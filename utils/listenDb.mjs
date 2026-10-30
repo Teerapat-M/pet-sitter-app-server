@@ -40,12 +40,19 @@ export function isTransactionPoolerUrl(connectionString) {
 const PRODUCTION_LISTEN_ERROR =
   "LISTEN_DATABASE_URL is required in production when DATABASE_URL is a transaction pooler (port 6543, or a pooler host with pgbouncer). Set it to the session pooler (5432) or a direct URI so chat and walk SSE can LISTEN.";
 
-/** Fail fast at boot: production + transaction-pooler DATABASE_URL needs a session LISTEN URI. */
+const PRODUCTION_LISTEN_POOLER_ERROR =
+  "LISTEN_DATABASE_URL must not be a transaction pooler in production (port 6543, or a pooler host with pgbouncer). Set it to the session pooler (5432) or a direct URI so chat and walk SSE can LISTEN.";
+
+/** Fail fast at boot: production LISTEN URI cannot be a transaction pooler. */
 export function assertProductionListenConfig(env = process.env) {
   if (String(env.NODE_ENV ?? "").toLowerCase() !== "production") {
     return;
   }
-  if (String(env.LISTEN_DATABASE_URL ?? "").trim()) {
+  const listenUrl = String(env.LISTEN_DATABASE_URL ?? "").trim();
+  if (listenUrl) {
+    if (isTransactionPoolerUrl(listenUrl)) {
+      throw new Error(PRODUCTION_LISTEN_POOLER_ERROR);
+    }
     return;
   }
   const databaseUrl = String(env.DATABASE_URL ?? "").trim();

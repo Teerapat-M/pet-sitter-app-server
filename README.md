@@ -179,7 +179,7 @@ npm run db:seed      # demo owners, sitters, pets, bookings, cameras, walks
 
 Both commands read `DATABASE_URL`. Use the **direct** Postgres URI (port 5432), not the pooler, for DDL. Do not point these scripts at production unless you intend to.
 
-Chat and GPS SSE use PostgreSQL `LISTEN/NOTIFY` on a **dedicated session connection**. If `DATABASE_URL` is the transaction pooler (`:6543`), set `LISTEN_DATABASE_URL` to the session pooler (`:5432`) or the direct URI. The query pool is unchanged. Listeners reconnect on connection error.
+Chat and GPS SSE use PostgreSQL `LISTEN/NOTIFY` on a **dedicated session connection**. If `DATABASE_URL` is the transaction pooler (`:6543`), set `LISTEN_DATABASE_URL` to the session pooler (`:5432`) or the direct URI. The query pool is unchanged. Listeners reconnect on connection error. In production, boot fails if `LISTEN_DATABASE_URL` is missing when `DATABASE_URL` is a transaction pooler, or if `LISTEN_DATABASE_URL` itself is a transaction pooler.
 
 Migrations use `NULLS NOT DISTINCT` unique indexes and `EXECUTE FUNCTION` triggers, so **PostgreSQL 15 or later** is required (Supabase current Postgres and the CI service image both qualify).
 
@@ -207,7 +207,7 @@ curl http://localhost:4000/health
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | Postgres URI for the query pool. Production may use the Supabase **transaction** pooler (port **6543**). SSL is on for `sslmode=require` (`{ rejectUnauthorized: false }`) and for `verify-ca` / `verify-full` (`{ rejectUnauthorized: true }`), even on localhost. Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
-| `LISTEN_DATABASE_URL` | Production if `DATABASE_URL` is a transaction pooler | Session pooler (port **5432**) or **direct** URI for `LISTEN/NOTIFY`. Used **only** by the chat and walk SSE listener clients. Transaction pooler connections cannot `LISTEN`. Falls back to `DATABASE_URL` outside that production check. Same SSL rules as the query pool, applied to this URI. In `NODE_ENV=production`, if `DATABASE_URL` is port **6543** or a pooler host with `pgbouncer`, missing `LISTEN_DATABASE_URL` fails at boot. |
+| `LISTEN_DATABASE_URL` | Production if `DATABASE_URL` is a transaction pooler | Session pooler (port **5432**) or **direct** URI for `LISTEN/NOTIFY`. Used **only** by the chat and walk SSE listener clients. Transaction pooler connections cannot `LISTEN`. Falls back to `DATABASE_URL` outside that production check. Same SSL rules as the query pool, applied to this URI. In `NODE_ENV=production`, if `DATABASE_URL` is port **6543** or a pooler host with `pgbouncer`, missing `LISTEN_DATABASE_URL` fails at boot. A `LISTEN_DATABASE_URL` that is itself a transaction pooler (port **6543**, or a pooler host with `pgbouncer`) also fails at boot. |
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only; Auth admin & storage (**never expose to FE**) |
 | `SUPABASE_JWKS_URL` | Yes | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
@@ -496,7 +496,7 @@ CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db
 - **`GET /api/reports`** — No admin auth yet (marked TODO in routes)
 - **`GET /api/users`** — Public list endpoint (consider restricting in production)
 - **Dual DB pool config** — `repositories/db.mjs` vs `utils/db.mjs` (both use `DATABASE_URL`)
-- **LISTEN/NOTIFY** — requires a session connection. Set `LISTEN_DATABASE_URL` when `DATABASE_URL` is the Supabase transaction pooler (port 6543).
+- **LISTEN/NOTIFY** — requires a session connection. Set `LISTEN_DATABASE_URL` to the session pooler (5432) or a direct URI when `DATABASE_URL` is the Supabase transaction pooler (port 6543). In production, a missing or transaction-pooler `LISTEN_DATABASE_URL` fails at boot.
 
 ---
 
