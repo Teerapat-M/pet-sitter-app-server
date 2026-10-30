@@ -15,16 +15,15 @@ import notificationsRouter from "./routes/notifications.route.mjs";
 import { startChatListener } from "./services/chatEvents.mjs";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./swagger.mjs";
-import { corsAllowList } from "./utils/corsOrigins.mjs";
+import { corsOptions } from "./utils/corsOrigins.mjs";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(
   cors({
-    origin: corsAllowList(),
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    ...corsOptions(),
+    credentials: true,
   })
 );
 

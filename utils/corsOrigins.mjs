@@ -25,3 +25,13 @@ export function corsAllowList(frontendUrl = process.env.FRONTEND_URL) {
   }
   return list;
 }
+
+/** Shared cors() options so allowed origins get Access-Control-Allow-Credentials. */
+export function corsOptions(frontendUrl = process.env.FRONTEND_URL) {
+  return {
+    origin: corsAllowList(frontendUrl),
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  };
+}
