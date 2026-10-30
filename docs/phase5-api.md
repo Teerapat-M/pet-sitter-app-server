@@ -1,7 +1,7 @@
 # Phase 5 API contract — CCTV (browser WebRTC)
 
 Client build target for live boarding cameras. Auth: `Authorization: Bearer <access_token>`.
-Base: `/api`. Media is **peer-to-peer WebRTC** (`getUserMedia` on a sitter-authenticated device at the venue). The API **never stores media, SDP, or ICE**.
+Base: `/api`. Media is **peer-to-peer WebRTC** (`getUserMedia` on a sitter-authenticated device at the venue). The API **never stores media**. Signalling SDP/ICE is held briefly in `camera_signals` (TTL ~5 minutes) so `pg_notify` can carry an id instead of the body.
 
 Build-spec §4: an owner may view only while the booking is `in_service`, the service is **boarding** at that venue, and `now` is inside the camera grant `validFrom..validTo` (grant window = booking check-in/out).
 
@@ -12,7 +12,7 @@ Build-spec §4: an owner may view only while the booking is `in_service`, the se
 Chat and GPS already fan out over **PostgreSQL `LISTEN/NOTIFY` + Server-Sent Events**. CCTV signalling reuses that stack:
 
 - `cameras` status / `is_enabled` fire `pg_notify('camera_events', …)` (migration `008`)
-- WebRTC offer/answer/ICE is `POST`ed, then `pg_notify` relays the JSON to the other peer’s SSE (payload capped so it fits NOTIFY)
+- WebRTC offer/answer/ICE is `POST`ed, stored in `camera_signals` (migration `009`), then `pg_notify` carries **only the row id**; the listener loads the payload and relays it over SSE
 - the listener uses `LISTEN_DATABASE_URL` (session pooler `:5432` or direct), same as chat/walk
 - no Realtime product, RLS, or client keys on the free tier
 - same Bearer `fetch` + `ReadableStream` as chat (EventSource cannot set headers)
@@ -178,12 +178,12 @@ venue device                         API                            owner app
 
 Limits (UTF-8 **bytes**, not JS `string.length` — Thai SDP is 3 bytes/char; oversized → **`413`**):
 
-- signalling request body ≤ **6000** bytes
-- full `pg_notify` JSON ≤ **7000** bytes (safely under Postgres’s **8000**-byte NOTIFY cap)
+- signalling request body ≤ **16384** bytes (16KB). Chromium video+audio offers are ~6KB; they must not 413.
+- `pg_notify` JSON is a **signal-ref** (`{ type: "signal-ref", signalId }`) ≤ **7000** bytes, under Postgres’s **8000**-byte cap. SDP/ICE are **not** in the NOTIFY payload.
 - **40** posts / minute / camera+user (`429`)
 - live sessions: **2 per owner per camera** and **8 total viewers per camera** (`429`)
 
-Live session records are **in-memory on a single Render instance** (demo). They are not shared across processes and are lost on restart. SDP/ICE are relayed in memory + NOTIFY, not written to a table.
+Live session records are **in-memory on a single Render instance** (demo). Signalling bodies live in `camera_signals` (id, session_id, camera_id, booking_id, payload, created_at; index on created_at). Insert deletes rows older than **5 minutes**; the camera watch sweeps as well. SDP/ICE are delivered over SSE after the listener fetches the row.
 
 A camera is listed / signalled only when `cameras.venue_id` matches `bookings.venue_id` (`IS NOT DISTINCT FROM`; both null = sitter’s default home). Mismatch → `403`.
 
@@ -216,4 +216,6 @@ Strangers get `404` (hide existence). The booking owner is a known party: wrong 
 
 `008_cctv_webrtc.sql` — `NOTIFY camera_events` on camera status/`is_enabled`; auto-insert `camera_access_grants` for boarding bookings (window = check-in/out in `Asia/Bangkok`). Grants match camera/booking `venue_id` (`IS NOT DISTINCT FROM`). The trigger also runs on date/time changes (`start_date`, `end_date`, `start_time`, `end_time`) and upserts `validFrom`/`validTo` (`ON CONFLICT DO UPDATE`, idempotent). Existing **`in_service` boarding** bookings are backfilled. Columns `status`, `is_enabled`, `last_seen_at` already exist from `002`. Optional `bookings.venue_id` (null = sitter default home).
 
-**Do not apply from the app.** Projects Manager applies it. 001–007 are already on the live DB after Phase 4. This PR does not touch any live database.
+`009_camera_signals.sql` — `camera_signals` table for short-lived offer/answer/ICE JSON (`id`, `session_id`, `camera_id`, `booking_id`, `payload`, `created_at`; index on `created_at`). NOTIFY sends the id only.
+
+**Do not apply from the app.** Projects Manager applies it. 001–008 are already on the live DB after Phase 5. This PR does not touch any live database.

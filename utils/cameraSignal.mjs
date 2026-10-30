@@ -1,11 +1,14 @@
 import { httpError } from "./httpError.mjs";
 
 export const SIGNAL_TYPES = ["offer", "answer", "ice"];
-/** First-pass cap on the request body (UTF-8 bytes). */
-export const MAX_SIGNAL_BYTES = 6000;
+/** Cap on the signalling request body (UTF-8 bytes). Chromium A/V offers are ~6KB. */
+export const MAX_SIGNAL_BYTES = 16384;
 /** Full pg_notify JSON must stay under Postgres's 8000-byte payload limit. */
 export const PG_NOTIFY_LIMIT_BYTES = 8000;
+/** NOTIFY carries only a signal-ref id, well under this cap. */
 export const MAX_NOTIFY_BYTES = 7000;
+/** camera_signals rows older than this are deleted on insert and by the watch. */
+export const SIGNAL_TTL_MS = 5 * 60 * 1000;
 export const MAX_SIGNALS_PER_MINUTE = 40;
 export const MAX_VIEWERS_PER_CAMERA = 8;
 export const MAX_SESSIONS_PER_OWNER_PER_CAMERA = 2;

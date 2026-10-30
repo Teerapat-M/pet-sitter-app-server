@@ -16,6 +16,9 @@ describe("docs/phase5-api.md ICE contract", () => {
     assert.match(md, /TTL 300s/);
     assert.match(md, /username = <unixExpiry>:<userId>/);
     assert.match(md, /oversized → \*\*`413`\*\*/);
+    assert.match(md, /16384/);
+    assert.match(md, /signal-ref/);
+    assert.match(md, /009_camera_signals\.sql/);
     assert.match(md, /2 per owner per camera/);
     assert.match(md, /8 total viewers per camera/);
     assert.match(md, /This camera is disabled/);

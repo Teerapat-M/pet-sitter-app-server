@@ -17,7 +17,19 @@ describe("listMigrationFiles", () => {
       "006_booking_phase3.sql",
       "007_walk_tracking.sql",
       "008_cctv_webrtc.sql",
+      "009_camera_signals.sql",
     ]);
+  });
+
+  it("009 stores signalling payloads and indexes created_at", () => {
+    const sql = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations/009_camera_signals.sql"),
+      "utf8"
+    );
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.camera_signals/);
+    assert.match(sql, /camera_signals_created_at_idx/);
+    assert.match(sql, /older than 5 minutes/);
+    assert.match(sql, /payload jsonb NOT NULL/);
   });
 
   it("008 notifies camera:status and ensures boarding grants", () => {
