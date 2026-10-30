@@ -12,6 +12,7 @@ import ownerBookingsRouter from "./routes/ownerBookings.route.mjs";
 import stripeWebhookRouter from "./routes/stripeWebhook.route.mjs";
 import reportsRouter from "./routes/reports.rout.mjs";
 import notificationsRouter from "./routes/notifications.route.mjs";
+import petTypesRouter from "./routes/petTypes.route.mjs";
 import { startChatListener } from "./services/chatEvents.mjs";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./swagger.mjs";
@@ -41,6 +42,7 @@ app.use("/api/sitters", sittersRouter); // sitter list + profile + booking list
 app.use("/api/banks", banksRouter); // T05 — รายชื่อธนาคารสำหรับ payout
 app.use("/api/admin", adminRouter); // admin panel
 app.use("/api/pets", petsRouter); // pet list + profile
+app.use("/api/pet-types", petTypesRouter); // public pet type list
 app.use("/api/conversations", chatRouter); // owner–sitter chat
 app.use("/api/bookings", ownerBookingsRouter); // owner booking history + create (cash | stripe)
 app.use("/api/reports", reportsRouter); //use for admin get report
