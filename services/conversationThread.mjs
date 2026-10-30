@@ -67,8 +67,31 @@ function parsePets(value) {
   return Array.isArray(value) ? value : [];
 }
 
+/** True when the booking's owner/sitter is the conversation pair. */
+export function bookingPairMatches(booking, ownerId, sitterId) {
+  return Boolean(
+    booking &&
+      booking.owner_id === ownerId &&
+      booking.sitter_id === sitterId
+  );
+}
+
+/** Persist booking_id only when it belongs to this owner/sitter pair. */
+export function resolveLinkedBookingId(booking, ownerId, sitterId) {
+  if (!bookingPairMatches(booking, ownerId, sitterId)) return null;
+  return booking.id ?? null;
+}
+
 export function toBookingSummary(row) {
-  const bookingId = row.booking_id ?? null;
+  const bookingId = resolveLinkedBookingId(
+    {
+      id: row.booking_id,
+      owner_id: row.booking_owner_id,
+      sitter_id: row.booking_sitter_id,
+    },
+    row.owner_id,
+    row.sitter_id
+  );
   if (!bookingId) return null;
   return {
     id: bookingId,
@@ -88,13 +111,13 @@ export function toBookingSummary(row) {
 export function toConversationThread(row, { sseConnected = false, now } = {}) {
   const booking = toBookingSummary(row);
   const lastSeenAt = row.other_last_seen_at ?? null;
-  const showPhone = canSeeOtherUserPhone(row.booking_status);
+  const showPhone = canSeeOtherUserPhone(booking?.status);
   return {
     id: String(row.id),
     ownerId: row.owner_id,
     sitterId: row.sitter_id,
     createdAt: row.created_at,
-    bookingId: row.booking_id ?? null,
+    bookingId: booking?.id ?? null,
     booking,
     otherUser: {
       id: row.other_user_id,

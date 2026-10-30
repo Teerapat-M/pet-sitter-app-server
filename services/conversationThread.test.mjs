@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createConversationsRepository } from "../repositories/conversations.repository.mjs";
+import {
+  createConversationsRepository,
+  LIST_FOR_USER_SQL,
+} from "../repositories/conversations.repository.mjs";
 import {
   bookingDates,
   canSeeOtherUserPhone,
+  resolveLinkedBookingId,
   toConversationThread,
 } from "./conversationThread.mjs";
 import { ONLINE_WINDOW_MS, isOnline } from "../utils/presence.mjs";
@@ -13,13 +17,32 @@ function fakePool(rows) {
     rows,
     lastSql: null,
     lastParams: null,
+    calls: [],
     async query(sql, params) {
       if (this == null || !Array.isArray(this.rows)) {
         throw new TypeError("Pool.query called without this");
       }
       this.lastSql = sql;
       this.lastParams = params;
+      this.calls.push({ sql, params });
       return { rows: this.rows };
+    },
+  };
+}
+
+function fakePoolHandler(handler) {
+  return {
+    lastSql: null,
+    lastParams: null,
+    calls: [],
+    async query(sql, params) {
+      if (this == null || typeof this.query !== "function") {
+        throw new TypeError("Pool.query called without this");
+      }
+      this.lastSql = sql;
+      this.lastParams = params;
+      this.calls.push({ sql, params });
+      return handler.call(this, sql, params);
     },
   };
 }
@@ -30,6 +53,8 @@ const baseRow = {
   sitter_id: "sitter-1",
   created_at: "2026-10-27T02:00:00.000Z",
   booking_id: "b0000001-0001-4001-8001-000000000001",
+  booking_owner_id: "owner-1",
+  booking_sitter_id: "sitter-1",
   other_user_id: "sitter-1",
   other_name: "Ploy S.",
   other_avatar_url: null,
@@ -119,6 +144,8 @@ describe("toConversationThread", () => {
     const thread = toConversationThread({
       ...baseRow,
       booking_id: null,
+      booking_owner_id: null,
+      booking_sitter_id: null,
       booking_status: null,
       booking_transaction_no: null,
       start_date: null,
@@ -127,6 +154,20 @@ describe("toConversationThread", () => {
       end_time: null,
       service_type: null,
       pets: null,
+    });
+    assert.equal(thread.bookingId, null);
+    assert.equal(thread.booking, null);
+    assert.equal(thread.otherUser.phone, null);
+  });
+
+  it("yields booking null and phone null when booking_id is not the conversation pair", () => {
+    const thread = toConversationThread({
+      ...baseRow,
+      booking_id: "b-someone-elses-booking",
+      booking_owner_id: "other-owner",
+      booking_sitter_id: "other-sitter",
+      booking_status: "in_service",
+      other_phone: "0891111111",
     });
     assert.equal(thread.bookingId, null);
     assert.equal(thread.booking, null);
@@ -184,6 +225,39 @@ describe("isOnline", () => {
   });
 });
 
+describe("resolveLinkedBookingId", () => {
+  it("keeps a booking that matches the conversation pair", () => {
+    assert.equal(
+      resolveLinkedBookingId(
+        { id: "b1", owner_id: "owner-1", sitter_id: "sitter-1" },
+        "owner-1",
+        "sitter-1"
+      ),
+      "b1"
+    );
+  });
+
+  it("rejects a booking that belongs to a different pair", () => {
+    assert.equal(
+      resolveLinkedBookingId(
+        { id: "b1", owner_id: "other-owner", sitter_id: "sitter-1" },
+        "owner-1",
+        "sitter-1"
+      ),
+      null
+    );
+    assert.equal(
+      resolveLinkedBookingId(
+        { id: "b1", owner_id: "owner-1", sitter_id: "other-sitter" },
+        "owner-1",
+        "sitter-1"
+      ),
+      null
+    );
+    assert.equal(resolveLinkedBookingId(null, "owner-1", "sitter-1"), null);
+  });
+});
+
 describe("createConversationsRepository", () => {
   it("fails if query is destructured off a Pool (unbound this)", async () => {
     const db = fakePool([]);
@@ -199,8 +273,121 @@ describe("createConversationsRepository", () => {
     const rows = await repo.listForUser("owner-1");
     assert.equal(rows.length, 1);
     assert.match(db.lastSql, /conversations\.booking_id/);
+    assert.match(db.lastSql, /bookings\.owner_id = conversations\.owner_id/);
+    assert.match(db.lastSql, /bookings\.sitter_id = conversations\.sitter_id/);
     assert.match(db.lastSql, /other_user\.last_seen_at/);
     assert.match(db.lastSql, /other_user\.phone/);
     assert.deepEqual(db.lastParams, ["owner-1"]);
+  });
+
+  it("joins bookings only when owner_id and sitter_id match the conversation", () => {
+    assert.match(LIST_FOR_USER_SQL, /bookings\.owner_id = conversations\.owner_id/);
+    assert.match(LIST_FOR_USER_SQL, /bookings\.sitter_id = conversations\.sitter_id/);
+  });
+
+  it("ignores booking_id that does not belong to the owner/sitter pair on create", async () => {
+    const db = fakePoolHandler(function handler(sql, params) {
+      if (/FROM public.bookings/.test(sql)) {
+        return { rows: [] };
+      }
+      if (/INSERT INTO public.conversations/.test(sql)) {
+        return {
+          rows: [
+            {
+              id: 9,
+              owner_id: params[0],
+              sitter_id: params[1],
+              booking_id: params[2],
+              created_at: "2026-10-30T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const repo = createConversationsRepository({
+      query: (...args) => db.query(...args),
+    });
+    const row = await repo.create({
+      ownerId: "owner-1",
+      sitterId: "sitter-1",
+      bookingId: "b-someone-elses-booking",
+    });
+    assert.equal(row.booking_id, null);
+    const lookup = db.calls.find((call) => /FROM public.bookings/.test(call.sql));
+    assert.match(lookup.sql, /owner_id = \$2/);
+    assert.match(lookup.sql, /sitter_id = \$3/);
+    assert.deepEqual(lookup.params, [
+      "b-someone-elses-booking",
+      "owner-1",
+      "sitter-1",
+    ]);
+    const insert = db.calls.find((call) =>
+      /INSERT INTO public.conversations/.test(call.sql)
+    );
+    assert.equal(insert.params[2], null);
+  });
+
+  it("links booking_id on create when the pair matches", async () => {
+    const bookingId = "b0000001-0001-4001-8001-000000000001";
+    const db = fakePoolHandler(function handler(sql, params) {
+      if (/FROM public.bookings/.test(sql)) {
+        return { rows: [{ id: bookingId }] };
+      }
+      if (/INSERT INTO public.conversations/.test(sql)) {
+        return {
+          rows: [
+            {
+              id: 9,
+              owner_id: params[0],
+              sitter_id: params[1],
+              booking_id: params[2],
+              created_at: "2026-10-30T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const repo = createConversationsRepository({
+      query: (...args) => db.query(...args),
+    });
+    const row = await repo.create({
+      ownerId: "owner-1",
+      sitterId: "sitter-1",
+      bookingId,
+    });
+    assert.equal(row.booking_id, bookingId);
+  });
+
+  it("does not set a mismatched booking_id on an existing conversation", async () => {
+    const existing = {
+      id: 1,
+      owner_id: "owner-1",
+      sitter_id: "sitter-1",
+      booking_id: null,
+      created_at: "2026-10-30T00:00:00.000Z",
+    };
+    const db = fakePoolHandler(function handler(sql) {
+      if (/FROM public.conversations/.test(sql)) {
+        return { rows: [existing] };
+      }
+      if (/FROM public.bookings/.test(sql)) {
+        return { rows: [] };
+      }
+      if (/UPDATE public.conversations/.test(sql)) {
+        throw new Error("should not update mismatched booking_id");
+      }
+      return { rows: [] };
+    });
+    const repo = createConversationsRepository({
+      query: (...args) => db.query(...args),
+    });
+    const row = await repo.setBookingId(1, "b-someone-elses-booking");
+    assert.equal(row.booking_id, null);
+    assert.equal(
+      db.calls.some((call) => /UPDATE public.conversations/.test(call.sql)),
+      false
+    );
   });
 });

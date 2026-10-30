@@ -6,7 +6,9 @@ SELECT
   conversations.owner_id,
   conversations.sitter_id,
   conversations.created_at,
-  conversations.booking_id,
+  bookings.id AS booking_id,
+  bookings.owner_id AS booking_owner_id,
+  bookings.sitter_id AS booking_sitter_id,
   other_user.id AS other_user_id,
   other_user.name AS other_name,
   other_user.avatar_url AS other_avatar_url,
@@ -33,6 +35,8 @@ JOIN public.users AS other_user
   END
 LEFT JOIN public.bookings
   ON bookings.id = conversations.booking_id
+ AND bookings.owner_id = conversations.owner_id
+ AND bookings.sitter_id = conversations.sitter_id
 LEFT JOIN public.services
   ON services.id = bookings.service_id
 LEFT JOIN LATERAL (
@@ -101,13 +105,32 @@ export function createConversationsRepository({
       return rows[0] ?? null;
     },
 
+    async resolveBookingIdForPair({ ownerId, sitterId, bookingId }) {
+      if (!bookingId) return null;
+      const { rows } = await query(
+        `SELECT id
+         FROM public.bookings
+         WHERE id = $1
+           AND owner_id = $2
+           AND sitter_id = $3
+         LIMIT 1`,
+        [bookingId, ownerId, sitterId]
+      );
+      return rows[0]?.id ?? null;
+    },
+
     async create({ ownerId, sitterId, bookingId = null }) {
+      const linkedBookingId = await this.resolveBookingIdForPair({
+        ownerId,
+        sitterId,
+        bookingId,
+      });
       try {
         const { rows } = await query(
           `INSERT INTO public.conversations (owner_id, sitter_id, booking_id)
            VALUES ($1, $2, $3)
            RETURNING id, owner_id, sitter_id, booking_id, created_at`,
-          [ownerId, sitterId, bookingId]
+          [ownerId, sitterId, linkedBookingId]
         );
         return rows[0];
       } catch (error) {
@@ -116,6 +139,27 @@ export function createConversationsRepository({
         }
         throw error;
       }
+    },
+
+    async setBookingId(id, bookingId) {
+      const conversation = await this.findById(id);
+      if (!conversation) return null;
+      const linkedBookingId = await this.resolveBookingIdForPair({
+        ownerId: conversation.owner_id,
+        sitterId: conversation.sitter_id,
+        bookingId,
+      });
+      if (bookingId && !linkedBookingId) {
+        return conversation;
+      }
+      const { rows } = await query(
+        `UPDATE public.conversations
+         SET booking_id = $2
+         WHERE id = $1
+         RETURNING id, owner_id, sitter_id, booking_id, created_at`,
+        [id, linkedBookingId]
+      );
+      return rows[0] ?? conversation;
     },
 
     async listForUser(userId) {
