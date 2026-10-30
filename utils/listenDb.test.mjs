@@ -243,10 +243,17 @@ describe("listener wiring", () => {
     );
     assert.match(chat, /createListenClient/);
     assert.match(walk, /createListenClient/);
+    const camera = fs.readFileSync(
+      fileURLToPath(new URL("../services/cameraEvents.mjs", import.meta.url)),
+      "utf8"
+    );
+    assert.match(camera, /createListenClient/);
     assert.doesNotMatch(chat, /pool\.connect\(\)/);
     assert.doesNotMatch(walk, /pool\.connect\(\)/);
+    assert.doesNotMatch(camera, /pool\.connect\(\)/);
     assert.match(chat, /scheduleReconnect/);
     assert.match(walk, /scheduleReconnect/);
+    assert.match(camera, /scheduleReconnect/);
   });
 
   it("fails fast at boot via assertProductionListenConfig", () => {
@@ -255,5 +262,6 @@ describe("listener wiring", () => {
       "utf8"
     );
     assert.match(app, /assertProductionListenConfig/);
+    assert.match(app, /startCameraListener/);
   });
 });

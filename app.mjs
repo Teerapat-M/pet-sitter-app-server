@@ -13,8 +13,10 @@ import stripeWebhookRouter from "./routes/stripeWebhook.route.mjs";
 import reportsRouter from "./routes/reports.rout.mjs";
 import notificationsRouter from "./routes/notifications.route.mjs";
 import petTypesRouter from "./routes/petTypes.route.mjs";
+import iceRouter from "./routes/ice.route.mjs";
 import { startChatListener } from "./services/chatEvents.mjs";
 import { startWalkListener } from "./services/walkEvents.mjs";
+import { startCameraListener, startCameraWatch } from "./services/cameraEvents.mjs";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./swagger.mjs";
 import { corsOptions } from "./utils/corsOrigins.mjs";
@@ -49,6 +51,7 @@ app.use("/api/conversations", chatRouter); // owner–sitter chat
 app.use("/api/bookings", ownerBookingsRouter); // owner booking history + create (cash | stripe)
 app.use("/api/reports", reportsRouter); //use for admin get report
 app.use("/api/notifications", notificationsRouter);
+app.use("/api/ice", iceRouter);
 
 //for api documentation
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -87,4 +90,8 @@ app.listen(PORT, "0.0.0.0", () => {
   startWalkListener().catch((error) => {
     console.error("Walk realtime listener failed:", error.message);
   });
+  startCameraListener().catch((error) => {
+    console.error("Camera realtime listener failed:", error.message);
+  });
+  startCameraWatch();
 });

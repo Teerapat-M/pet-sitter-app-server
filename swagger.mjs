@@ -16,7 +16,7 @@ export const swaggerSpec = swaggerJsdoc({
       title: "Pet Sitter API Documentation",
       version: "1.0.0",
       description:
-        "API for pet owner, sitter, booking, and admin. Phase 3: boarding / dog walking / in-home quote, checkout, and status lifecycle (docs/phase3-api.md). Phase 4: GPS walk tracking over SSE (docs/phase4-api.md).",
+        "API for pet owner, sitter, booking, and admin. Phase 3: boarding / dog walking / in-home quote, checkout, and status lifecycle (docs/phase3-api.md). Phase 4: GPS walk tracking over SSE (docs/phase4-api.md). Phase 5: CCTV WebRTC signalling over SSE (docs/phase5-api.md).",
     },
     servers: [{ url: "http://localhost:4000" }],
     components: {
@@ -64,6 +64,16 @@ export const swaggerSpec = swaggerJsdoc({
             lng: { type: "number", minimum: -180, maximum: 180 },
             accuracy: { type: "number", nullable: true },
             recordedAt: { type: "string", format: "date-time" },
+          },
+        },
+        CameraSignal: {
+          type: "object",
+          required: ["type", "sessionId"],
+          properties: {
+            type: { type: "string", enum: ["offer", "answer", "ice"] },
+            sessionId: { type: "string" },
+            sdp: { type: "string" },
+            candidate: {},
           },
         },
         WalkPointsRequest: {

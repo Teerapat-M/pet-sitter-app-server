@@ -16,7 +16,18 @@ describe("listMigrationFiles", () => {
       "005_conversation_booking_and_presence.sql",
       "006_booking_phase3.sql",
       "007_walk_tracking.sql",
+      "008_cctv_webrtc.sql",
     ]);
+  });
+
+  it("008 notifies camera:status and ensures boarding grants", () => {
+    const sql = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations/008_cctv_webrtc.sql"),
+      "utf8"
+    );
+    assert.match(sql, /pg_notify\('camera_events'/);
+    assert.match(sql, /ensure_camera_grants_for_booking/);
+    assert.match(sql, /cameras_status_notify/);
   });
 
   it("007 unique-indexes one walk per booking after deleting extras", () => {

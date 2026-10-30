@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { bookingsController } from "../controllers/bookings.controller.mjs";
 import { walksController } from "../controllers/walks.controller.mjs";
+import { camerasController } from "../controllers/cameras.controller.mjs";
 import { requireAuth } from "../middlewares/auth.middleware.mjs";
 
 const ownerBookingsRouter = Router();
@@ -207,6 +208,97 @@ ownerBookingsRouter.get(
   "/:id/walk/events",
   requireAuth,
   walksController.streamWalk
+);
+
+/**
+ * @openapi
+ * /api/bookings/{id}/cameras:
+ *   get:
+ *     summary: Cameras + status + access window for an in-service boarding booking
+ *     tags: [Cameras]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Cameras and access window
+ *       403:
+ *         description: Owner outside window, not in_service, or not boarding
+ *       404:
+ *         description: Booking not found
+ */
+ownerBookingsRouter.get(
+  "/:id/cameras",
+  requireAuth,
+  camerasController.listForBooking
+);
+
+/**
+ * @openapi
+ * /api/bookings/{id}/cameras/events:
+ *   get:
+ *     summary: SSE camera:status and WebRTC signalling for this booking
+ *     tags: [Cameras]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Server-sent events stream
+ *       403:
+ *         description: Live view not allowed
+ *       404:
+ *         description: Booking not found
+ */
+ownerBookingsRouter.get(
+  "/:id/cameras/events",
+  requireAuth,
+  camerasController.streamBooking
+);
+
+/**
+ * @openapi
+ * /api/bookings/{id}/cameras/{cameraId}/signal:
+ *   post:
+ *     summary: Relay a WebRTC offer or ICE candidate from the owner viewer
+ *     tags: [Cameras]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: cameraId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CameraSignal'
+ *     responses:
+ *       200:
+ *         description: Relayed (not stored)
+ *       403:
+ *         description: Disabled camera, outside window, or not boarding
+ *       404:
+ *         description: Booking not found
+ */
+ownerBookingsRouter.post(
+  "/:id/cameras/:cameraId/signal",
+  requireAuth,
+  camerasController.viewerSignal
 );
 
 /**
