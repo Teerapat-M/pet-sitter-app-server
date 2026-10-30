@@ -98,12 +98,44 @@ describe("assertProductionListenConfig", () => {
     );
   });
 
-  it("allows production when LISTEN_DATABASE_URL is set or the query URL is not a pooler", () => {
+  it("fails fast in production when LISTEN_DATABASE_URL itself is a transaction pooler", () => {
+    assert.throws(
+      () =>
+        assertProductionListenConfig({
+          NODE_ENV: "production",
+          DATABASE_URL: DIRECT,
+          LISTEN_DATABASE_URL: POOLER,
+        }),
+      (err) => {
+        assert.match(err.message, /LISTEN_DATABASE_URL must not be a transaction pooler/);
+        assert.match(err.message, /6543|pgbouncer/i);
+        return true;
+      }
+    );
+    assert.throws(
+      () =>
+        assertProductionListenConfig({
+          NODE_ENV: "production",
+          DATABASE_URL: POOLER,
+          LISTEN_DATABASE_URL: `${SESSION}?pgbouncer=true`,
+        }),
+      /LISTEN_DATABASE_URL must not be a transaction pooler/
+    );
+  });
+
+  it("allows production when LISTEN_DATABASE_URL is a session or direct URI, or the query URL is not a pooler", () => {
     assert.doesNotThrow(() =>
       assertProductionListenConfig({
         NODE_ENV: "production",
         DATABASE_URL: POOLER,
         LISTEN_DATABASE_URL: SESSION,
+      })
+    );
+    assert.doesNotThrow(() =>
+      assertProductionListenConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: POOLER,
+        LISTEN_DATABASE_URL: DIRECT,
       })
     );
     assert.doesNotThrow(() =>
@@ -116,6 +148,7 @@ describe("assertProductionListenConfig", () => {
       assertProductionListenConfig({
         NODE_ENV: "test",
         DATABASE_URL: POOLER,
+        LISTEN_DATABASE_URL: POOLER,
       })
     );
   });

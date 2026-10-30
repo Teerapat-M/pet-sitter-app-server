@@ -13,7 +13,7 @@ Chat already fans out over **PostgreSQL `LISTEN/NOTIFY` + Server-Sent Events** (
 
 - `walk_points` / `walks` fire `pg_notify('walk_events', …)` (migration `007`)
 - the API holds one dedicated `LISTEN` connection (chat has another) and writes SSE frames to subscribers of that `bookingId`
-- that listener uses `LISTEN_DATABASE_URL` (session pooler `:5432` or direct) when set, otherwise `DATABASE_URL`. The query pool can stay on the transaction pooler (`:6543`), which cannot `LISTEN`
+- that listener uses `LISTEN_DATABASE_URL` (session pooler `:5432` or direct) when set, otherwise `DATABASE_URL`. The query pool can stay on the transaction pooler (`:6543`), which cannot `LISTEN`. In production, boot fails if `LISTEN_DATABASE_URL` is missing when `DATABASE_URL` is a transaction pooler, or if `LISTEN_DATABASE_URL` itself is a transaction pooler (port 6543, or a pooler host with `pgbouncer`)
 - no extra Realtime product, RLS policies, or client keys on the free tier
 - same `Authorization: Bearer` header as the rest of the API (use `fetch` + `ReadableStream`; `EventSource` cannot set headers)
 
