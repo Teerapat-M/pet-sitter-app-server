@@ -28,6 +28,7 @@ import {
   refundStripePaymentIfCaptured,
 } from "./stripeBookingPayment.mjs";
 import { toStripeAmount } from "../utils/stripeAmount.mjs";
+import { endSessionsForBooking } from "./cameraEvents.mjs";
 import { reviewsRepository } from "../repositories/reviews.repository.mjs";
 import { reportsRepository } from "../repositories/reports.repository.mjs";
 import { httpError } from "../utils/httpError.mjs";
@@ -159,6 +160,10 @@ export const bookingsService = {
       bookingId,
       nextStatus
     );
+
+    if (booking.status === "in_service" && nextStatus !== "in_service") {
+      endSessionsForBooking(bookingId, "booking_ended");
+    }
 
     const ownerId = booking.owner_id ?? booking.pet_owner?.id;
     if (nextStatus === "waiting_service" && ownerId) {

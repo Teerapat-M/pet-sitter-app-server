@@ -4,6 +4,7 @@ import { requireAuth, requireSitter } from "../middlewares/auth.middleware.mjs";
 import { uploadSitterImages } from "../middlewares/uploadSitterImages.mjs";
 import { uploadBookBankImage } from "../middlewares/uploadBookBankImage.mjs";
 import bookingsRouter from "./bookings.route.mjs";
+import sitterCamerasRouter from "./sitterCameras.route.mjs";
 
 const sittersRouter = Router();
 
@@ -223,6 +224,7 @@ sittersRouter.post(
 );
 
 sittersRouter.use("/bookings", bookingsRouter);
+sittersRouter.use("/cameras", sitterCamerasRouter);
 // ต้องวาง /me และ /bookings ก่อน /:id เพราะ Express อ่านบนลงล่าง
 
 /**

@@ -17,7 +17,7 @@ Chat already fans out over **PostgreSQL `LISTEN/NOTIFY` + Server-Sent Events** (
 - no extra Realtime product, RLS policies, or client keys on the free tier
 - same `Authorization: Bearer` header as the rest of the API (use `fetch` + `ReadableStream`; `EventSource` cannot set headers)
 
-Supabase Realtime would duplicate this channel and need table replication + client anon keys. Keep GPS on the existing SSE path; Phase 5 CCTV can still use Realtime for WebRTC signalling.
+Supabase Realtime would duplicate this channel and need table replication + client anon keys. Keep GPS on the existing SSE path. Phase 5 CCTV signalling uses the same SSE + `LISTEN/NOTIFY` pattern (`docs/phase5-api.md`).
 
 ---
 
