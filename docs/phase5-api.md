@@ -12,7 +12,7 @@ Build-spec §4: an owner may view only while the booking is `in_service`, the se
 Chat and GPS already fan out over **PostgreSQL `LISTEN/NOTIFY` + Server-Sent Events**. CCTV signalling reuses that stack:
 
 - `cameras` status / `is_enabled` fire `pg_notify('camera_events', …)` (migration `008`)
-- WebRTC offer/answer/ICE is `POST`ed (write-time authz), stored in `camera_signals` (migration `009`), then `pg_notify` carries **only the row id**. The listener **fetches by id and recipient** (`toUserId`, plus sitter/booking/camera/session when the subscriber has them) and relays over SSE. A cross-user fetch returns no row. SSE still routes by `toUserId` / `sitterId` / `bookingId`.
+- WebRTC offer/answer/ICE is `POST`ed (write-time authz), stored in `camera_signals` (migration `009`), then `pg_notify` carries **only the row id**. The listener **loads that row once** (`findSignalById`; UUID-validated) and **fans out in memory** to subscribers that pass recipient scope (`toUserId`, plus sitter/booking/camera/session when present). Cross-user subscribers do not receive the body.
 - the listener uses `LISTEN_DATABASE_URL` (session pooler `:5432` or direct), same as chat/walk
 - no Realtime product, RLS, or client keys on the free tier
 - same Bearer `fetch` + `ReadableStream` as chat (EventSource cannot set headers)
@@ -188,10 +188,10 @@ Live session records are **in-memory on a single Render instance** (demo). Signa
 Signalling authz is three layers:
 
 1. **Write** — `POST …/signal` (owner grant + venue + enabled, or camera sitter).
-2. **Fetch** — `findSignal(id, { userId, sitterId?, bookingId?, cameraId?, sessionId?, cameraIds? })`. Requires `payload.toUserId` = that subscriber; camera/session/booking/sitter filters apply when present. Id-only or another user’s fetch returns **nothing**.
-3. **SSE** — `subscriberMatches` still delivers only to the addressed booking/sitter stream.
+2. **Fetch** — one `findSignalById` per NOTIFY (not one query per connected client). Invalid UUIDs (`signalId`, `cameraId`, `bookingId`) are rejected **before Postgres** (`400 Invalid …` on HTTP; LISTEN skips the ref). `sessionId` is an opaque client id (non-empty), not a UUID column.
+3. **Fan-out** — in memory, `signalMatchesScope` keeps recipient scoping (`toUserId`, plus sitter/booking/camera/session when the subscriber has them). Another user’s stream does not get the SDP.
 
-SDP/ICE are not in the NOTIFY payload. The listener does not load a row unless a current subscriber is the recipient.
+SDP/ICE are not in the NOTIFY payload.
 
 A camera is listed / signalled only when `cameras.venue_id` matches `bookings.venue_id` (`IS NOT DISTINCT FROM`; both null = sitter’s default home). Mismatch → `403`.
 
@@ -224,6 +224,6 @@ Strangers get `404` (hide existence). The booking owner is a known party: wrong 
 
 `008_cctv_webrtc.sql` — `NOTIFY camera_events` on camera status/`is_enabled`; auto-insert `camera_access_grants` for boarding bookings (window = check-in/out in `Asia/Bangkok`). Grants match camera/booking `venue_id` (`IS NOT DISTINCT FROM`). The trigger also runs on date/time changes (`start_date`, `end_date`, `start_time`, `end_time`) and upserts `validFrom`/`validTo` (`ON CONFLICT DO UPDATE`, idempotent). Existing **`in_service` boarding** bookings are backfilled. Columns `status`, `is_enabled`, `last_seen_at` already exist from `002`. Optional `bookings.venue_id` (null = sitter default home).
 
-`009_camera_signals.sql` — `camera_signals` table for short-lived offer/answer/ICE JSON (`id`, `session_id`, `camera_id`, `booking_id`, `payload`, `created_at`; index on `created_at`). NOTIFY sends the id only. Fetch is scoped to the recipient (`payload.toUserId` plus camera/session/booking/sitter as applicable); no extra migration.
+`009_camera_signals.sql` — `camera_signals` table for short-lived offer/answer/ICE JSON (`id`, `session_id`, `camera_id`, `booking_id`, `payload`, `created_at`; index on `created_at`). NOTIFY sends the id only. The listener fetches once by id, then scopes delivery in memory.
 
 **Do not apply from the app.** Projects Manager applies it. 001–008 are already on the live DB after Phase 5. This PR does not touch any live database.

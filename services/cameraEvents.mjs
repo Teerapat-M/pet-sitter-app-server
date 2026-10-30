@@ -10,7 +10,10 @@ import {
   MAX_VIEWERS_PER_CAMERA,
 } from "../utils/cameraSignal.mjs";
 import { httpError } from "../utils/httpError.mjs";
-import { camerasRepository } from "../repositories/cameras.repository.mjs";
+import {
+  camerasRepository,
+  signalMatchesScope,
+} from "../repositories/cameras.repository.mjs";
 
 export const CAMERA_CHANNEL = "camera_events";
 
@@ -200,7 +203,7 @@ async function handleNotification(
   {
     now,
     listRecipients,
-    getSignal = (id, scope) => camerasRepository.findSignal(id, scope),
+    getSignal = (id) => camerasRepository.findSignalById(id),
   } = {}
 ) {
   let parsed;
@@ -210,31 +213,43 @@ async function handleNotification(
     return;
   }
   if (parsed?.type === "signal-ref" && parsed.signalId) {
-    let body = null;
-    const tried = new Set();
-    for (const sub of [...clients]) {
-      const key = `${sub.userId}\0${sub.bookingId ?? ""}\0${sub.sitterId ?? ""}`;
-      if (tried.has(key)) continue;
-      tried.add(key);
-      const row = await getSignal(parsed.signalId, {
-        userId: sub.userId,
-        sitterId: sub.sitterId || undefined,
-        bookingId: sub.bookingId || undefined,
-        cameraIds: sub.cameraIds || undefined,
-      });
-      let next = row?.payload ?? null;
-      if (typeof next === "string") {
-        try {
-          next = JSON.parse(next);
-        } catch {
-          continue;
-        }
-      }
-      if (next && typeof next === "object") {
-        body = next;
+    let row;
+    try {
+      row = await getSignal(parsed.signalId);
+    } catch {
+      return;
+    }
+    let body = row?.payload ?? null;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        return;
       }
     }
-    if (body) publishCameraEvent(body);
+    if (!body || typeof body !== "object") return;
+    const stored = {
+      ...row,
+      payload: body,
+    };
+    const normalized = normalizeCameraSsePayload(body);
+    for (const sub of [...clients]) {
+      if (
+        !signalMatchesScope(stored, {
+          userId: sub.userId,
+          sitterId: sub.sitterId || undefined,
+          bookingId: sub.bookingId || undefined,
+          cameraIds: sub.cameraIds || undefined,
+        })
+      ) {
+        continue;
+      }
+      try {
+        sendEvent(sub.res, normalized);
+      } catch {
+        clients.delete(sub);
+      }
+    }
     return;
   }
   if (parsed?.type === "camera:status" && parsed.cameraId) {
@@ -280,7 +295,7 @@ function scheduleReconnect() {
 export async function startCameraListener({
   listRecipients = (cameraId, now) =>
     camerasRepository.listActiveGrantRecipients(cameraId, now),
-  getSignal = (id, scope) => camerasRepository.findSignal(id, scope),
+  getSignal = (id) => camerasRepository.findSignalById(id),
 } = {}) {
   const previous = listenClient;
   listenClient = null;

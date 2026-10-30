@@ -222,10 +222,7 @@ describe("camera SSE", () => {
     await handleCameraNotification(
       JSON.stringify({ type: "signal-ref", signalId: "sig-1" }),
       {
-        getSignal: async (id, scope) =>
-          id === "sig-1" && scope?.userId === "sitter"
-            ? { id, payload: stored }
-            : null,
+        getSignal: async (id) => (id === "sig-1" ? { id, payload: stored } : null),
       }
     );
     const chunk = sitter.res.chunks.find((row) => row.includes("s-ref"));
@@ -248,21 +245,65 @@ describe("camera SSE", () => {
       sitterId: "ploy",
       sdp: "v=0-secret-ploy",
     };
-    const fetches = [];
+    let fetches = 0;
     await handleCameraNotification(
       JSON.stringify({ type: "signal-ref", signalId: "sig-ploy" }),
       {
-        getSignal: async (id, scope) => {
-          fetches.push(scope?.userId);
+        getSignal: async (id) => {
+          fetches += 1;
           if (id !== "sig-ploy") return null;
-          if (scope?.userId !== "ploy") return null;
           return { id, payload: stored };
         },
       }
     );
-    assert.ok(fetches.includes("nok"));
-    assert.ok(fetches.includes("ploy"));
+    assert.equal(fetches, 1);
     assert.equal(nok.res.chunks.filter((row) => row.includes("secret-ploy")).length, 0);
     assert.equal(ploy.res.chunks.filter((row) => row.includes("secret-ploy")).length, 1);
+  });
+
+  it("fetches a signal-ref once with many subscribers", async () => {
+    const a = mockReqRes();
+    const b = mockReqRes();
+    const c = mockReqRes();
+    subscribeCameraEvents({ userId: "sitter", sitterId: "sitter" }, a.req, a.res);
+    subscribeCameraEvents({ userId: "owner", bookingId: "b1", cameraIds: new Set(["c1"]) }, b.req, b.res);
+    subscribeCameraEvents({ userId: "other", sitterId: "other" }, c.req, c.res);
+    let fetches = 0;
+    const stored = {
+      type: "signal",
+      kind: "offer",
+      sessionId: "s1",
+      cameraId: "c1",
+      bookingId: "b1",
+      toUserId: "sitter",
+      sitterId: "sitter",
+      sdp: "v=0-once",
+    };
+    await handleCameraNotification(
+      JSON.stringify({ type: "signal-ref", signalId: "sig-once" }),
+      {
+        getSignal: async (id) => {
+          fetches += 1;
+          return id === "sig-once" ? { id, payload: stored, camera_id: "c1", booking_id: "b1" } : null;
+        },
+      }
+    );
+    assert.equal(fetches, 1);
+    assert.equal(a.res.chunks.filter((row) => row.includes("v=0-once")).length, 1);
+    assert.equal(b.res.chunks.filter((row) => row.includes("v=0-once")).length, 0);
+    assert.equal(c.res.chunks.filter((row) => row.includes("v=0-once")).length, 0);
+  });
+
+  it("skips an invalid signal UUID without throwing", async () => {
+    await handleCameraNotification(
+      JSON.stringify({ type: "signal-ref", signalId: "not-a-uuid" }),
+      {
+        getSignal: async () => {
+          const err = new Error("Invalid id");
+          err.statusCode = 400;
+          throw err;
+        },
+      }
+    );
   });
 });

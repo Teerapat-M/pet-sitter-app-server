@@ -1,5 +1,6 @@
 import { camerasRepository } from "../repositories/cameras.repository.mjs";
 import { httpError } from "../utils/httpError.mjs";
+import { requireUuid } from "../utils/uuid.mjs";
 import { utcIso } from "../utils/iso.mjs";
 import {
   assertCameraEnabled,
@@ -23,16 +24,6 @@ import {
   openCameraSession,
   getCameraSession,
 } from "./cameraEvents.mjs";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function requireUuid(value, field = "id") {
-  if (!UUID_RE.test(String(value ?? ""))) {
-    throw httpError(400, `Invalid ${field}`);
-  }
-  return String(value);
-}
 
 function requireName(value) {
   const name = String(value ?? "").trim();

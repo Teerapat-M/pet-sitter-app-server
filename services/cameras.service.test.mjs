@@ -139,6 +139,9 @@ function fakeRepo(state) {
       state.signals.push(row);
       return row;
     },
+    async findSignalById(id) {
+      return state.signals.find((item) => item.id === id) ?? null;
+    },
     async findSignal(id, scope = {}) {
       const row = state.signals.find((item) => item.id === id) ?? null;
       if (!row) return null;
@@ -208,7 +211,7 @@ describe("camerasService auth matrix", () => {
       notify: async (payload) => {
         notified.push(payload);
         await handleCameraNotification(JSON.stringify(payload), {
-          getSignal: (id, scope) => repo.findSignal(id, scope),
+          getSignal: (id) => repo.findSignalById(id),
         });
       },
       now: () => NOW,
@@ -249,6 +252,31 @@ describe("camerasService auth matrix", () => {
     assert.equal(data.access.canView, true);
     assert.equal(data.access.validTo, "2026-11-15T05:00:00.000Z");
     assert.match(data.cameras[0].lastSeenAt, /Z$/);
+  });
+
+  it("400s invalid UUIDs on signalling params without hitting a 500", async () => {
+    await assert.rejects(
+      () =>
+        service.postViewerSignal(OWNER, "not-a-uuid", CAMERA_ID, {
+          type: "offer",
+          sessionId: "s1",
+          sdp: "v=0",
+        }),
+      (err) => err.statusCode === 400 && /bookingId/.test(err.message)
+    );
+    await assert.rejects(
+      () =>
+        service.postViewerSignal(OWNER, BOOKING_ID, "nope", {
+          type: "offer",
+          sessionId: "s1",
+          sdp: "v=0",
+        }),
+      (err) => err.statusCode === 400 && /cameraId/.test(err.message)
+    );
+    await assert.rejects(
+      () => service.getMine(SITTER, "bad-camera"),
+      (err) => err.statusCode === 400 && /cameraId/.test(err.message)
+    );
   });
 
   it("404s a user who is not the booking party", async () => {
