@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import { createCamerasService } from "./cameras.service.mjs";
+import { signalMatchesScope } from "../repositories/cameras.repository.mjs";
 import {
   handleCameraNotification,
   resetCameraClients,
@@ -138,8 +139,10 @@ function fakeRepo(state) {
       state.signals.push(row);
       return row;
     },
-    async findSignal(id) {
-      return state.signals.find((row) => row.id === id) ?? null;
+    async findSignal(id, scope = {}) {
+      const row = state.signals.find((item) => item.id === id) ?? null;
+      if (!row) return null;
+      return signalMatchesScope(row, scope) ? row : null;
     },
     async deleteExpiredSignals() {
       const cutoff = Date.now() - SIGNAL_TTL_MS;
@@ -205,7 +208,7 @@ describe("camerasService auth matrix", () => {
       notify: async (payload) => {
         notified.push(payload);
         await handleCameraNotification(JSON.stringify(payload), {
-          getSignal: (id) => repo.findSignal(id),
+          getSignal: (id, scope) => repo.findSignal(id, scope),
         });
       },
       now: () => NOW,
@@ -362,6 +365,24 @@ describe("camerasService auth matrix", () => {
     assert.ok(chunk, "publisher SSE should receive the full offer");
     assert.ok(chunk.includes("x".repeat(64)));
     assert.match(chunk, /"kind":"offer"/);
+  });
+
+  it("findSignal returns nothing for a user who is not the recipient", async () => {
+    const repo = fakeRepo(state);
+    await service.postViewerSignal(OWNER, BOOKING_ID, CAMERA_ID, {
+      type: "offer",
+      sessionId: "sess-scope",
+      sdp: "v=0-scoped",
+    });
+    const id = notified.find((row) => row.type === "signal-ref")?.signalId;
+    assert.ok(id);
+    assert.equal(await repo.findSignal(id), null);
+    assert.equal(await repo.findSignal(id, { userId: OTHER }), null);
+    assert.equal(await repo.findSignal(id, { userId: OWNER }), null);
+    const hit = await repo.findSignal(id, { userId: SITTER });
+    assert.ok(hit);
+    assert.equal(hit.payload.toUserId, SITTER);
+    assert.equal(hit.payload.sdp, "v=0-scoped");
   });
 
   it("413s a signalling body over 16KB", async () => {

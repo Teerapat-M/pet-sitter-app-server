@@ -221,11 +221,48 @@ describe("camera SSE", () => {
     };
     await handleCameraNotification(
       JSON.stringify({ type: "signal-ref", signalId: "sig-1" }),
-      { getSignal: async (id) => (id === "sig-1" ? { id, payload: stored } : null) }
+      {
+        getSignal: async (id, scope) =>
+          id === "sig-1" && scope?.userId === "sitter"
+            ? { id, payload: stored }
+            : null,
+      }
     );
     const chunk = sitter.res.chunks.find((row) => row.includes("s-ref"));
     assert.ok(chunk);
     assert.ok(chunk.includes("y".repeat(64)));
     assert.equal(JSON.stringify(stored).includes("signal-ref"), false);
+  });
+
+  it("does not load another user's signal-ref on a cross-user fetch", async () => {
+    const ploy = mockReqRes();
+    const nok = mockReqRes();
+    subscribeCameraEvents({ userId: "ploy", sitterId: "ploy" }, ploy.req, ploy.res);
+    subscribeCameraEvents({ userId: "nok", sitterId: "nok" }, nok.req, nok.res);
+    const stored = {
+      type: "signal",
+      kind: "offer",
+      sessionId: "s-ploy",
+      cameraId: "c-ploy",
+      toUserId: "ploy",
+      sitterId: "ploy",
+      sdp: "v=0-secret-ploy",
+    };
+    const fetches = [];
+    await handleCameraNotification(
+      JSON.stringify({ type: "signal-ref", signalId: "sig-ploy" }),
+      {
+        getSignal: async (id, scope) => {
+          fetches.push(scope?.userId);
+          if (id !== "sig-ploy") return null;
+          if (scope?.userId !== "ploy") return null;
+          return { id, payload: stored };
+        },
+      }
+    );
+    assert.ok(fetches.includes("nok"));
+    assert.ok(fetches.includes("ploy"));
+    assert.equal(nok.res.chunks.filter((row) => row.includes("secret-ploy")).length, 0);
+    assert.equal(ploy.res.chunks.filter((row) => row.includes("secret-ploy")).length, 1);
   });
 });
