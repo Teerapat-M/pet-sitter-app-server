@@ -196,7 +196,7 @@ curl http://localhost:4000/health
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | Postgres URI. SSL is off for `localhost` / `127.0.0.1` or `sslmode=disable`; otherwise `{ rejectUnauthorized: false }` |
+| `DATABASE_URL` | Yes | Postgres URI. SSL is on for `sslmode=require` / `verify-ca` / `verify-full` (even on localhost). Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only; Auth admin & storage (**never expose to FE**) |
 | `SUPABASE_JWKS_URL` | Yes | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
