@@ -92,7 +92,7 @@ Allowed only when the caller is the booking **owner** (or the booking sitter) **
 }
 ```
 
-Disabled cameras stay in the list (`isEnabled: false`) so the tile can show “Sitter turned this camera off”. Signalling a disabled camera is `403`.
+Disabled cameras stay in the list (`isEnabled: false`) so the tile can show “Sitter turned this camera off”. Signalling **or** `GET /api/ice` for a disabled camera is `403` (no TURN creds).
 
 `GET /api/bookings/:id/cameras/events` — SSE (same gate as GET)
 
@@ -107,21 +107,28 @@ Disabled cameras stay in the list (`isEnabled: false`) so the tile can show “S
 
 ## ICE
 
-`GET /api/ice?cameraId=&bookingId=` (Bearer)
+`GET /api/ice` (Bearer) is **not** unscoped. **`cameraId` and/or `bookingId` is required.**
 
-Not a public STUN/TURN dump. The caller must pass **`cameraId`** (must be that camera’s sitter) and/or **`bookingId`** (must be the booking owner with an **active grant**). Missing both → `400`. Wrong party → `404`. Owner without a covering grant / wrong venue → `403`. Disabled camera (sitter or owner) → `403` `This camera is disabled` — same as signalling; no TURN creds.
+| Query | Who | Gate |
+|-------|-----|------|
+| `cameraId` | that camera’s sitter | camera must be enabled |
+| `bookingId` | booking owner | active covering grant, same venue, at least one enabled camera |
+| both | owner (sitter still wins on `cameraId` if they own the camera) | grant + venue + enabled |
+| neither | — | **`400` `cameraId or bookingId is required`** |
 
-Always includes Google STUN. Optional TURN from env (placeholders only — never commit real credentials):
+Wrong party / unknown camera → `404`. Owner without a covering grant or wrong venue → `403`. **Disabled camera** (sitter or owner) → **`403` `This camera is disabled`** — same as signalling; **no TURN creds**.
 
-- When `TURN_SECRET` is set: coturn REST HMAC — `username = <unixExpiry>:<userId>`, `credential = base64(HMAC-SHA1(secret, username))`, TTL 300s.
-- Static `TURN_USERNAME` / `TURN_CREDENTIAL` are a **fallback only** when `TURN_SECRET` is unset, and are still gated behind the grant/sitter check.
+Always includes Google STUN (`stun:stun.l.google.com:19302`). Optional TURN from env (placeholders only — never commit real credentials):
+
+- When `TURN_SECRET` is set: coturn REST HMAC, **TTL 300s**. `username = <unixExpiry>:<userId>`, `credential = base64(HMAC-SHA1(secret, username))`.
+- Static `TURN_USERNAME` / `TURN_CREDENTIAL` are a **fallback only** when `TURN_SECRET` is unset, and are still gated (same `cameraId`/`bookingId` check). They are never returned to an arbitrary logged-in user.
 
 ```json
 {
   "data": {
     "iceServers": [
       { "urls": ["stun:stun.l.google.com:19302"] },
-      { "urls": ["turn:turn.example.com:3478"], "username": "expiry:userId", "credential": "…" }
+      { "urls": ["turn:turn.example.com:3478"], "username": "1770000000:user-uuid", "credential": "…" }
     ]
   }
 }
@@ -159,7 +166,7 @@ venue device                         API                            owner app
      |                                |  camera:status online           |
      |                                | ------------------------------> | GET /bookings/:id/cameras
      |                                |                                 | GET /bookings/:id/cameras/events
-     |                                |                                 | GET /ice?bookingId=
+     | GET /ice?cameraId=             |                                 | GET /ice?bookingId=
      |                                |     POST …/signal offer         |
      |  SSE signal offer              | <------------------------------ |
      | POST …/signal answer           |                                 |
@@ -169,13 +176,12 @@ venue device                         API                            owner app
      | ============ SRTP media P2P (or TURN) ============               |
 ```
 
-Limits (UTF-8 **bytes**, not JS string length — Thai SDP is 3 bytes/char):
+Limits (UTF-8 **bytes**, not JS `string.length` — Thai SDP is 3 bytes/char; oversized → **`413`**):
 
-- signalling body ≤ **6000** bytes (`413`)
-- full `pg_notify` JSON ≤ **7000** bytes, under Postgres’s 8000-byte cap (`413`)
+- signalling request body ≤ **6000** bytes
+- full `pg_notify` JSON ≤ **7000** bytes (safely under Postgres’s **8000**-byte NOTIFY cap)
 - **40** posts / minute / camera+user (`429`)
-- **8** live viewers / camera (`429`)
-- **2** live sessions / owner / camera (`429`)
+- live sessions: **2 per owner per camera** and **8 total viewers per camera** (`429`)
 
 Live session records are **in-memory on a single Render instance** (demo). They are not shared across processes and are lost on restart. SDP/ICE are relayed in memory + NOTIFY, not written to a table.
 
@@ -191,17 +197,18 @@ Sitter SSE (`GET /api/sitters/cameras/events`) is scoped to **that sitter**. `ca
 
 Strangers get `404` (hide existence). The booking owner is a known party: wrong service / status / window / venue / disabled camera → `403`.
 
-| Actor | GET booking cameras | POST viewer signal | Sitter CRUD / heartbeat / publisher signal |
-|-------|---------------------|--------------------|---------------------------------------------|
-| Booking sitter (own cameras) | 200 | — (use publisher path) | 200 |
-| Booking owner, in-service boarding, in window, camera at this venue, enabled | 200 | 200 | 404 |
-| Booking owner, camera at another venue | **403** (or omitted from list) | **403** | 404 |
-| Booking owner, camera disabled | 200 (listed) | **403** | 404 |
-| Booking owner, outside grant window | **403** | **403** | 404 |
-| Booking owner, not `in_service` | **403** | **403** | 404 |
-| Booking owner, not boarding | **403** | **403** | 404 |
-| Other user / wrong booking | **404** | **404** | 404 |
-| Unauthenticated | 401 | 401 | 401 |
+| Actor | GET booking cameras | POST viewer signal | GET `/api/ice` | Sitter CRUD / heartbeat / publisher signal |
+|-------|---------------------|--------------------|----------------|---------------------------------------------|
+| Booking sitter (own cameras) | 200 | — (use publisher path) | 200 (`cameraId`, enabled) | 200 |
+| Booking owner, in-service boarding, in window, camera at this venue, enabled | 200 | 200 | 200 (`bookingId`) | 404 |
+| Booking owner, camera at another venue | **403** (or omitted from list) | **403** | **403** | 404 |
+| Booking owner, camera disabled | 200 (listed) | **403** | **403** (no TURN) | 404 |
+| Booking owner, outside grant window | **403** | **403** | **403** | 404 |
+| Booking owner, not `in_service` | **403** | **403** | **403** | 404 |
+| Booking owner, not boarding | **403** | **403** | **403** | 404 |
+| Other user / wrong booking | **404** | **404** | **404** | 404 |
+| Unauthenticated | 401 | 401 | 401 | 401 |
+| Logged-in, no `cameraId`/`bookingId` | — | — | **400** | — |
 
 ---
 
