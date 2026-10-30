@@ -15,24 +15,14 @@ import notificationsRouter from "./routes/notifications.route.mjs";
 import { startChatListener } from "./services/chatEvents.mjs";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./swagger.mjs";
-
-
+import { corsAllowList } from "./utils/corsOrigins.mjs";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Frontend ที่อนุญาตให้เรียก API ได้
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:3001",
-  "http://127.0.0.1:3000",
-  "http://127.0.0.1:3001",
-  "https://pet-sitter-app-client-khaki.vercel.app",
-];
-
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: corsAllowList(),
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })

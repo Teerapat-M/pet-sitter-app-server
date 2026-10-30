@@ -21,6 +21,15 @@ describe("buildResetRedirectUrl", () => {
       return true;
     });
   });
+
+  it("uses the first origin when FRONTEND_URL is comma-separated", () => {
+    assert.equal(
+      buildResetRedirectUrl(
+        "https://petsitter.example,http://localhost:3000"
+      ),
+      "https://petsitter.example/reset-password"
+    );
+  });
 });
 
 describe("runForgotPassword", () => {
