@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { bookingsController } from "../controllers/bookings.controller.mjs";
+import { walksController } from "../controllers/walks.controller.mjs";
 import { requireAuth, requireSitter } from "../middlewares/auth.middleware.mjs";
 
 const bookingsRouter = Router();
@@ -150,6 +151,100 @@ bookingsRouter.patch(
   requireAuth,
   requireSitter,
   bookingsController.updateMyBookingStatus
+);
+
+/**
+ * @openapi
+ * /api/sitters/bookings/{id}/walk/start:
+ *   post:
+ *     summary: Start a live GPS walk (booking must be in_service dog walking)
+ *     tags: [Walks]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Walk is live
+ *       400:
+ *         description: Booking is not an in-service dog walk
+ *       403:
+ *         description: Booking owner (known party) cannot start the walk
+ *       404:
+ *         description: Booking not found
+ */
+bookingsRouter.post(
+  "/:id/walk/start",
+  requireAuth,
+  requireSitter,
+  walksController.startWalk
+);
+
+/**
+ * @openapi
+ * /api/sitters/bookings/{id}/walk/points:
+ *   post:
+ *     summary: Post one GPS point or a batch (every 5–10s)
+ *     tags: [Walks]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/WalkPointsRequest'
+ *     responses:
+ *       200:
+ *         description: Accepted points (outliers skipped)
+ *       400:
+ *         description: Invalid or empty batch
+ *       403:
+ *         description: Booking owner (known party) cannot post points
+ *       429:
+ *         description: Too many posts
+ */
+bookingsRouter.post(
+  "/:id/walk/points",
+  requireAuth,
+  requireSitter,
+  walksController.postPoints
+);
+
+/**
+ * @openapi
+ * /api/sitters/bookings/{id}/walk/end:
+ *   post:
+ *     summary: End the walk, store summary, mark booking completed
+ *     tags: [Walks]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Walk ended; booking is completed
+ *       400:
+ *         description: No live walk
+ *       403:
+ *         description: Booking owner (known party) cannot end the walk
+ */
+bookingsRouter.post(
+  "/:id/walk/end",
+  requireAuth,
+  requireSitter,
+  walksController.endWalk
 );
 
 export default bookingsRouter;

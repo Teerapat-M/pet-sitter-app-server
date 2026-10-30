@@ -1,6 +1,11 @@
-import { pool } from "../repositories/db.mjs";
 import { messagesRepository } from "../repositories/messages.repository.mjs";
 import { usersRepository } from "../repositories/users.repository.mjs";
+import {
+  closeListenClient,
+  createListenClient,
+  isTransactionPoolerUrl,
+  listenClientConfig,
+} from "../utils/listenDb.mjs";
 import { scheduleLastSeenTouch } from "../utils/presence.mjs";
 import { toMessage } from "./chat.service.mjs";
 
@@ -150,31 +155,36 @@ function scheduleReconnect() {
     reconnectTimer = null;
     startChatListener();
   }, 3000);
+  reconnectTimer.unref?.();
 }
 
 export async function startChatListener() {
-  if (listenClient) {
-    try {
-      listenClient.removeAllListeners();
-      listenClient.release();
-    } catch {
-      // ignore
-    }
-    listenClient = null;
-  }
+  const previous = listenClient;
+  listenClient = null;
+  await closeListenClient(previous);
 
+  let client;
   try {
-    const client = await pool.connect();
+    const config = listenClientConfig();
+    if (isTransactionPoolerUrl(config.connectionString)) {
+      console.warn(
+        "Chat LISTEN is using a transaction pooler (port 6543). Set LISTEN_DATABASE_URL to the session pooler (5432) or a direct URI."
+      );
+    }
+    client = createListenClient();
+    await client.connect();
     listenClient = client;
 
     client.on("error", (error) => {
       console.error("Chat realtime connection error:", error.message);
+      if (listenClient === client) listenClient = null;
+      closeListenClient(client).catch(() => {});
+      scheduleReconnect();
+    });
+
+    client.on("end", () => {
+      if (listenClient !== client) return;
       listenClient = null;
-      try {
-        client.release();
-      } catch {
-        // ignore
-      }
       scheduleReconnect();
     });
 
@@ -190,6 +200,7 @@ export async function startChatListener() {
     console.log("Chat realtime listener ready");
   } catch (error) {
     listenClient = null;
+    await closeListenClient(client);
     console.error("Chat realtime listener failed:", error.message);
     scheduleReconnect();
   }

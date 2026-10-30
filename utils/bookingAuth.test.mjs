@@ -5,6 +5,7 @@ import {
   assertOwnerAccess,
   assertPartyAccess,
   assertSitterAccess,
+  assertWalkerWriteAccess,
   isBookingOwner,
   isBookingSitter,
 } from "./bookingAuth.mjs";
@@ -49,6 +50,22 @@ describe("booking role checks", () => {
     assertPartyAccess(booking, "owner-1");
     assertPartyAccess(booking, "sitter-1");
     assert.throws(() => assertPartyAccess(booking, "other-1"), (err) => {
+      assert.equal(err.statusCode, 404);
+      return true;
+    });
+  });
+
+  it("walker writes are 403 for the owner and 404 for others", () => {
+    assertWalkerWriteAccess(booking, "sitter-1");
+    assert.throws(() => assertWalkerWriteAccess(booking, "owner-1"), (err) => {
+      assert.equal(err.statusCode, 403);
+      return true;
+    });
+    assert.throws(() => assertWalkerWriteAccess(booking, "other-1"), (err) => {
+      assert.equal(err.statusCode, 404);
+      return true;
+    });
+    assert.throws(() => assertWalkerWriteAccess(null, "sitter-1"), (err) => {
       assert.equal(err.statusCode, 404);
       return true;
     });

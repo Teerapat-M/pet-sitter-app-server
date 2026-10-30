@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { bookingsController } from "../controllers/bookings.controller.mjs";
+import { walksController } from "../controllers/walks.controller.mjs";
 import { requireAuth } from "../middlewares/auth.middleware.mjs";
 
 const ownerBookingsRouter = Router();
@@ -125,6 +126,87 @@ ownerBookingsRouter.post(
   "/:id/checkout",
   requireAuth,
   bookingsController.checkout
+);
+
+/**
+ * @openapi
+ * /api/bookings/{id}/walk:
+ *   get:
+ *     summary: Current walk + summary (owner or sitter)
+ *     tags: [Walks]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Walk or null if not started
+ *       404:
+ *         description: Booking not found
+ */
+ownerBookingsRouter.get("/:id/walk", requireAuth, walksController.getWalk);
+
+/**
+ * @openapi
+ * /api/bookings/{id}/walk/points:
+ *   get:
+ *     summary: Walk route history + summary
+ *     tags: [Walks]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: afterId
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 2000 }
+ *     responses:
+ *       200:
+ *         description: Points in recordedAt order plus summary
+ *       404:
+ *         description: Booking or walk not found
+ */
+ownerBookingsRouter.get(
+  "/:id/walk/points",
+  requireAuth,
+  walksController.listPoints
+);
+
+/**
+ * @openapi
+ * /api/bookings/{id}/walk/events:
+ *   get:
+ *     summary: Live GPS trail (SSE)
+ *     description: |
+ *       Same Bearer SSE pattern as `GET /api/conversations/events`.
+ *       Snapshot first (`waiting` | `live` | `ended`), then `point` / `started` / `ended`.
+ *       Leaflet + OSM should plot `lat`/`lng` from each `point` event.
+ *     tags: [Walks]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Server-sent events stream
+ *       404:
+ *         description: Booking not found
+ */
+ownerBookingsRouter.get(
+  "/:id/walk/events",
+  requireAuth,
+  walksController.streamWalk
 );
 
 /**

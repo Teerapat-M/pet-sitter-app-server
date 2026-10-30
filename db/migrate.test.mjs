@@ -15,7 +15,20 @@ describe("listMigrationFiles", () => {
       "004_clip_camera_grants_on_reschedule.sql",
       "005_conversation_booking_and_presence.sql",
       "006_booking_phase3.sql",
+      "007_walk_tracking.sql",
     ]);
+  });
+
+  it("007 unique-indexes one walk per booking after deleting extras", () => {
+    const sql = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations/007_walk_tracking.sql"),
+      "utf8"
+    );
+    const deleteAt = sql.indexOf("DELETE FROM public.walks");
+    const uniqueAt = sql.indexOf("walks_one_per_booking_idx");
+    assert.ok(deleteAt >= 0, "expected duplicate walk cleanup");
+    assert.ok(uniqueAt > deleteAt, "unique index must come after cleanup");
+    assert.match(sql, /pg_notify\('walk_events'/);
   });
 
   it("006 nulls duplicate conversation booking_ids before the unique index", () => {
