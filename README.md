@@ -400,7 +400,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/` | Bearer | STUN + gated TURN. Query `cameraId` (camera sitter) and/or `bookingId` (owner with an active grant). HMAC creds when `TURN_SECRET` is set. |
+| GET | `/` | Bearer | STUN + gated TURN. Query `cameraId` (camera sitter) and/or `bookingId` (owner with an active grant). Disabled camera → 403. HMAC creds when `TURN_SECRET` is set. |
 
 ### Banks — `/api/banks`
 

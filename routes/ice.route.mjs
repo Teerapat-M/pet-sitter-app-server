@@ -11,7 +11,8 @@ const iceRouter = Router();
  *     summary: WebRTC ICE servers (Google STUN + gated TURN)
  *     description: |
  *       Requires `cameraId` (sitter of that camera) and/or `bookingId` (owner with
- *       an active grant). TURN uses short-lived HMAC creds when `TURN_SECRET` is set.
+ *       an active grant). Disabled cameras are `403` (no TURN creds). TURN uses
+ *       short-lived HMAC creds when `TURN_SECRET` is set.
  *     tags: [Cameras]
  *     security:
  *       - bearerAuth: []
@@ -30,7 +31,7 @@ const iceRouter = Router();
  *       401:
  *         description: Unauthorized
  *       403:
- *         description: No active grant / not this camera's sitter
+ *         description: No active grant / disabled camera / not this camera's sitter
  *       404:
  *         description: Camera or booking not found
  */

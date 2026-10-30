@@ -106,6 +106,7 @@ export function createCamerasService({
       if (camId) {
         const camera = await camerasRepo.findById(camId);
         if (camera && String(camera.sitter_id) === String(userId)) {
+          assertCameraEnabled(camera);
           return iceConfig(userId, env, { now: now() });
         }
       }
@@ -119,6 +120,7 @@ export function createCamerasService({
           const grant = await camerasRepo.findGrant(booking.id, camId);
           ownerGrantOr403(booking, userId, grant);
           assertCameraMatchesBookingVenue(grant, booking);
+          assertCameraEnabled(grant);
         } else {
           const grants = await camerasRepo.listGrantsForBooking(booking.id);
           const covering = grants.filter(
@@ -126,6 +128,10 @@ export function createCamerasService({
               grantCoversAt(grant, now()) && cameraMatchesBookingVenue(grant, booking)
           );
           ownerGrantOr403(booking, userId, covering[0] ?? null);
+          const enabled = covering.find(
+            (grant) => grant.is_enabled !== false && grant.isEnabled !== false
+          );
+          assertCameraEnabled(enabled ?? covering[0]);
         }
         return iceConfig(userId, env, { now: now() });
       }
