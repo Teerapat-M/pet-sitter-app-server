@@ -36,4 +36,12 @@ export const usersController = {
     }
   },
 
+  async setOnboardingSeen(req, res, next) {
+    try {
+      const user = await usersService.setOnboardingSeen(req.user.id, req.body);
+      res.status(200).json({ data: user });
+    } catch (error) {
+      next(error);
+    }
+  },
 };

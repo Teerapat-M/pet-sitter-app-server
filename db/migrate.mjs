@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import "dotenv/config";
+import { sslForDatabaseUrl } from "../utils/pgSsl.mjs";
 
 const { Client } = pg;
 
@@ -15,10 +16,9 @@ export function poolConfig(connectionString = process.env.DATABASE_URL) {
   if (!connectionString) {
     throw new Error("DATABASE_URL is required");
   }
-  const isSupabase = /supabase\.(co|com)/i.test(connectionString);
   return {
     connectionString,
-    ssl: isSupabase ? { rejectUnauthorized: false } : undefined,
+    ssl: sslForDatabaseUrl(connectionString),
   };
 }
 
