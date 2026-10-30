@@ -402,6 +402,23 @@ describe("camerasService auth matrix", () => {
     );
   });
 
+  it("403s ICE for a disabled camera on sitter and owner paths", async () => {
+    state.cameras[0].is_enabled = false;
+    state.grants[0].is_enabled = false;
+    await assert.rejects(
+      () => service.iceFor(SITTER, { cameraId: CAMERA_ID }),
+      (err) => err.statusCode === 403 && /disabled/.test(err.message)
+    );
+    await assert.rejects(
+      () => service.iceFor(OWNER, { bookingId: BOOKING_ID, cameraId: CAMERA_ID }),
+      (err) => err.statusCode === 403 && /disabled/.test(err.message)
+    );
+    await assert.rejects(
+      () => service.iceFor(OWNER, { bookingId: BOOKING_ID }),
+      (err) => err.statusCode === 403 && /disabled/.test(err.message)
+    );
+  });
+
   it("403s ICE when the camera is not at the booking venue", async () => {
     state.bookings[BOOKING_ID] = boarding({ venue_id: HOME_VENUE });
     state.grants[0].venue_id = OTHER_VENUE;

@@ -109,7 +109,7 @@ Disabled cameras stay in the list (`isEnabled: false`) so the tile can show “S
 
 `GET /api/ice?cameraId=&bookingId=` (Bearer)
 
-Not a public STUN/TURN dump. The caller must pass **`cameraId`** (must be that camera’s sitter) and/or **`bookingId`** (must be the booking owner with an **active grant**). Missing both → `400`. Wrong party → `404`. Owner without a covering grant / wrong venue → `403`.
+Not a public STUN/TURN dump. The caller must pass **`cameraId`** (must be that camera’s sitter) and/or **`bookingId`** (must be the booking owner with an **active grant**). Missing both → `400`. Wrong party → `404`. Owner without a covering grant / wrong venue → `403`. Disabled camera (sitter or owner) → `403` `This camera is disabled` — same as signalling; no TURN creds.
 
 Always includes Google STUN. Optional TURN from env (placeholders only — never commit real credentials):
 
