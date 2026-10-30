@@ -195,11 +195,33 @@ export function expireCameraSessions(now = new Date()) {
   return ended;
 }
 
-async function handleNotification(raw, { now, listRecipients } = {}) {
+async function handleNotification(
+  raw,
+  {
+    now,
+    listRecipients,
+    getSignal = (id) => camerasRepository.findSignal(id),
+  } = {}
+) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
+    return;
+  }
+  if (parsed?.type === "signal-ref" && parsed.signalId) {
+    const row = await getSignal(parsed.signalId);
+    let body = row?.payload ?? null;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        return;
+      }
+    }
+    if (body && typeof body === "object") {
+      publishCameraEvent(body);
+    }
     return;
   }
   if (parsed?.type === "camera:status" && parsed.cameraId) {
@@ -245,6 +267,7 @@ function scheduleReconnect() {
 export async function startCameraListener({
   listRecipients = (cameraId, now) =>
     camerasRepository.listActiveGrantRecipients(cameraId, now),
+  getSignal = (id) => camerasRepository.findSignal(id),
 } = {}) {
   const previous = listenClient;
   listenClient = null;
@@ -277,7 +300,7 @@ export async function startCameraListener({
 
     client.on("notification", (notification) => {
       if (notification.channel !== CAMERA_CHANNEL || !notification.payload) return;
-      handleNotification(notification.payload, { listRecipients }).catch((error) => {
+      handleNotification(notification.payload, { listRecipients, getSignal }).catch((error) => {
         console.error("Camera realtime notify failed:", error.message);
       });
     });
@@ -296,10 +319,14 @@ export function startCameraWatch({
   intervalMs = 10_000,
   staleMs = 30_000,
   markStale = (ms) => camerasRepository.markStaleOffline(ms),
+  deleteExpiredSignals = () => camerasRepository.deleteExpiredSignals(),
 } = {}) {
   if (watchTimer) return watchTimer;
   watchTimer = setInterval(() => {
     expireCameraSessions();
+    Promise.resolve(deleteExpiredSignals()).catch((error) => {
+      console.error("Camera signal cleanup failed:", error.message);
+    });
     Promise.resolve(markStale(staleMs)).catch((error) => {
       console.error("Camera heartbeat watch failed:", error.message);
     });

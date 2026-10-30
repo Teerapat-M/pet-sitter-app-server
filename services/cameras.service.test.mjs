@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import { createCamerasService } from "./cameras.service.mjs";
 import {
-  publishCameraEvent,
+  handleCameraNotification,
   resetCameraClients,
   subscribeCameraEvents,
   getCameraSession,
 } from "./cameraEvents.mjs";
-import { resetCameraSignalRate } from "../utils/cameraSignal.mjs";
+import {
+  MAX_SIGNAL_BYTES,
+  PG_NOTIFY_LIMIT_BYTES,
+  SIGNAL_TTL_MS,
+  resetCameraSignalRate,
+  utf8ByteLength,
+} from "../utils/cameraSignal.mjs";
 import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 
@@ -116,6 +122,33 @@ function fakeRepo(state) {
         ) ?? null
       );
     },
+    async insertSignal({ sessionId, cameraId, bookingId, payload }) {
+      const cutoff = Date.now() - SIGNAL_TTL_MS;
+      state.signals = state.signals.filter(
+        (row) => new Date(row.created_at).getTime() >= cutoff
+      );
+      const row = {
+        id: `sig-${state.signals.length + 1}`,
+        session_id: sessionId,
+        camera_id: cameraId,
+        booking_id: bookingId,
+        payload,
+        created_at: new Date(),
+      };
+      state.signals.push(row);
+      return row;
+    },
+    async findSignal(id) {
+      return state.signals.find((row) => row.id === id) ?? null;
+    },
+    async deleteExpiredSignals() {
+      const cutoff = Date.now() - SIGNAL_TTL_MS;
+      const before = state.signals.length;
+      state.signals = state.signals.filter(
+        (row) => new Date(row.created_at).getTime() >= cutoff
+      );
+      return before - state.signals.length;
+    },
   };
 }
 
@@ -154,6 +187,7 @@ describe("camerasService auth matrix", () => {
     notified = [];
     state = {
       notified,
+      signals: [],
       cameras: [cameraRow()],
       bookings: {
         [BOOKING_ID]: boarding(),
@@ -165,11 +199,14 @@ describe("camerasService auth matrix", () => {
       },
       grants: [grantRow()],
     };
+    const repo = fakeRepo(state);
     service = createCamerasService({
-      camerasRepo: fakeRepo(state),
+      camerasRepo: repo,
       notify: async (payload) => {
         notified.push(payload);
-        publishCameraEvent(payload);
+        await handleCameraNotification(JSON.stringify(payload), {
+          getSignal: (id) => repo.findSignal(id),
+        });
       },
       now: () => NOW,
     });
@@ -302,6 +339,46 @@ describe("camerasService auth matrix", () => {
       candidate: { candidate: "candidate:1", sdpMid: "0" },
     });
     assert.match(owner.res.chunks.at(-1), /"kind":"ice"/);
+  });
+
+  it("relays a ~10KB SDP end-to-end via NOTIFY ref (under PG 8000)", async () => {
+    const sdp = `v=0\n${"x".repeat(10 * 1024)}`;
+    assert.ok(Buffer.byteLength(sdp, "utf8") > 10_000);
+    const { req, res } = mockReqRes();
+    subscribeCameraEvents({ userId: SITTER, sitterId: SITTER }, req, res, {
+      type: "snapshot",
+    });
+    await service.postViewerSignal(OWNER, BOOKING_ID, CAMERA_ID, {
+      type: "offer",
+      sessionId: "sess-10k",
+      sdp,
+    });
+    const ref = notified.at(-1);
+    assert.equal(ref.type, "signal-ref");
+    assert.ok(ref.signalId);
+    assert.equal(ref.sdp, undefined);
+    assert.ok(utf8ByteLength(ref) < PG_NOTIFY_LIMIT_BYTES);
+    const chunk = res.chunks.find((row) => row.includes("sess-10k"));
+    assert.ok(chunk, "publisher SSE should receive the full offer");
+    assert.ok(chunk.includes("x".repeat(64)));
+    assert.match(chunk, /"kind":"offer"/);
+  });
+
+  it("413s a signalling body over 16KB", async () => {
+    const sdp = "x".repeat(MAX_SIGNAL_BYTES);
+    await assert.rejects(
+      () =>
+        service.postViewerSignal(OWNER, BOOKING_ID, CAMERA_ID, {
+          type: "offer",
+          sessionId: "sess-too-big",
+          sdp,
+        }),
+      (err) => err.statusCode === 413
+    );
+    assert.equal(
+      notified.filter((row) => row.type === "signal-ref").length,
+      0
+    );
   });
 
   it("marks the camera online on heartbeat", async () => {

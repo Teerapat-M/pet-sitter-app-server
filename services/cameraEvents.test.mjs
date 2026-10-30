@@ -204,4 +204,28 @@ describe("camera SSE", () => {
       (err) => err.statusCode === 429 && /sessions/.test(err.message)
     );
   });
+
+  it("loads a signal-ref from storage and relays the full body over SSE", async () => {
+    const sitter = mockReqRes();
+    subscribeCameraEvents({ userId: "sitter", sitterId: "sitter" }, sitter.req, sitter.res);
+    const sdp = `v=0\n${"y".repeat(8000)}`;
+    const stored = {
+      type: "signal",
+      kind: "offer",
+      sessionId: "s-ref",
+      cameraId: "c1",
+      bookingId: "b1",
+      toUserId: "sitter",
+      sitterId: "sitter",
+      sdp,
+    };
+    await handleCameraNotification(
+      JSON.stringify({ type: "signal-ref", signalId: "sig-1" }),
+      { getSignal: async (id) => (id === "sig-1" ? { id, payload: stored } : null) }
+    );
+    const chunk = sitter.res.chunks.find((row) => row.includes("s-ref"));
+    assert.ok(chunk);
+    assert.ok(chunk.includes("y".repeat(64)));
+    assert.equal(JSON.stringify(stored).includes("signal-ref"), false);
+  });
 });

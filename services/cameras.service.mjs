@@ -95,6 +95,19 @@ export function createCamerasService({
     return grant;
   }
 
+  async function enqueueSignal(payload) {
+    const row = await camerasRepo.insertSignal({
+      sessionId: payload.sessionId,
+      cameraId: payload.cameraId,
+      bookingId: payload.bookingId,
+      payload,
+    });
+    const ref = { type: "signal-ref", signalId: String(row.id) };
+    assertNotifyPayloadSize(ref);
+    await notify(ref);
+    return row;
+  }
+
   return {
     async iceFor(userId, { cameraId, bookingId } = {}, env = process.env) {
       const camId = cameraId ? requireUuid(cameraId, "cameraId") : null;
@@ -279,8 +292,7 @@ export function createCamerasService({
         sdp: signal.sdp,
         candidate: signal.candidate,
       };
-      assertNotifyPayloadSize(payload);
-      await notify(payload);
+      await enqueueSignal(payload);
       return { ok: true, sessionId: signal.sessionId };
     },
 
@@ -335,8 +347,7 @@ export function createCamerasService({
         sdp: signal.sdp,
         candidate: signal.candidate,
       };
-      assertNotifyPayloadSize(payload);
-      await notify(payload);
+      await enqueueSignal(payload);
       return { ok: true, sessionId: signal.sessionId };
     },
   };

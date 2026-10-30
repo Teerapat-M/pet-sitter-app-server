@@ -210,6 +210,40 @@ export function createCamerasRepository({
     async ensureGrantsForBooking(bookingId, q = query) {
       await q("SELECT public.ensure_camera_grants_for_booking($1)", [bookingId]);
     },
+
+    async insertSignal({ sessionId, cameraId, bookingId, payload }, q = query) {
+      const { rows } = await q(
+        `WITH expired AS (
+           DELETE FROM camera_signals
+           WHERE created_at < now() - interval '5 minutes'
+         )
+         INSERT INTO camera_signals (session_id, camera_id, booking_id, payload)
+         VALUES ($1, $2, $3, $4::jsonb)
+         RETURNING id, session_id, camera_id, booking_id, payload, created_at`,
+        [sessionId, cameraId, bookingId ?? null, JSON.stringify(payload)]
+      );
+      return rows[0];
+    },
+
+    async findSignal(signalId, q = query) {
+      const { rows } = await q(
+        `SELECT id, session_id, camera_id, booking_id, payload, created_at
+         FROM camera_signals
+         WHERE id = $1
+         LIMIT 1`,
+        [signalId]
+      );
+      return rows[0] ?? null;
+    },
+
+    async deleteExpiredSignals(maxAgeMs = 5 * 60 * 1000, now = new Date(), q = query) {
+      const cutoff = new Date(now.getTime() - maxAgeMs);
+      const result = await q(
+        `DELETE FROM camera_signals WHERE created_at < $1`,
+        [cutoff]
+      );
+      return result.rowCount ?? 0;
+    },
   };
 }
 

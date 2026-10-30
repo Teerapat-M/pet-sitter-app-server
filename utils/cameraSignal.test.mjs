@@ -32,7 +32,8 @@ describe("parseSignalBody", () => {
     );
   });
 
-  it("rejects oversized payloads", () => {
+  it("rejects payloads over 16KB UTF-8", () => {
+    assert.equal(MAX_SIGNAL_BYTES, 16384);
     const sdp = "x".repeat(MAX_SIGNAL_BYTES);
     assert.throws(
       () => parseSignalBody({ type: "offer", sessionId: "s1", sdp }),
@@ -40,9 +41,16 @@ describe("parseSignalBody", () => {
     );
   });
 
+  it("accepts a Chromium-sized (~6KB) offer", () => {
+    const sdp = "v=0\n" + "x".repeat(6034);
+    assert.ok(Buffer.byteLength(sdp, "utf8") > 6000);
+    assert.ok(Buffer.byteLength(JSON.stringify({ type: "offer", sessionId: "s1", sdp }), "utf8") < MAX_SIGNAL_BYTES);
+    assert.equal(parseSignalBody({ type: "offer", sessionId: "s1", sdp }).type, "offer");
+  });
+
   it("413s a Thai payload that fits char length but exceeds UTF-8 bytes", () => {
-    const thai = "ก".repeat(2500);
-    assert.equal(thai.length, 2500);
+    const thai = "ก".repeat(5500);
+    assert.equal(thai.length, 5500);
     assert.ok(thai.length < MAX_SIGNAL_BYTES);
     assert.ok(Buffer.byteLength(thai, "utf8") > MAX_SIGNAL_BYTES);
     assert.throws(
@@ -64,24 +72,15 @@ describe("parseSignalBody", () => {
 });
 
 describe("assertNotifyPayloadSize", () => {
-  it("measures the full NOTIFY JSON in UTF-8 bytes, under the PG 8000 cap", () => {
+  it("keeps signal-ref NOTIFY payloads under the PG 8000 cap", () => {
     assert.equal(PG_NOTIFY_LIMIT_BYTES, 8000);
     assert.ok(MAX_NOTIFY_BYTES < PG_NOTIFY_LIMIT_BYTES);
-    const thai = "ก".repeat(2400);
-    const payload = {
-      type: "signal",
-      kind: "offer",
-      sessionId: "s1",
-      cameraId: "ca000001-0001-4001-8001-000000000001",
-      bookingId: "b0000001-0001-4001-8001-000000000001",
-      sdp: thai,
+    const ref = {
+      type: "signal-ref",
+      signalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     };
-    assert.ok(JSON.stringify(payload).length < MAX_NOTIFY_BYTES);
-    assert.ok(utf8ByteLength(payload) > MAX_NOTIFY_BYTES);
-    assert.throws(
-      () => assertNotifyPayloadSize(payload),
-      (err) => err.statusCode === 413
-    );
+    assert.ok(utf8ByteLength(ref) < MAX_NOTIFY_BYTES);
+    assert.equal(assertNotifyPayloadSize(ref), JSON.stringify(ref));
   });
 });
 

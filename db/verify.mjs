@@ -22,6 +22,7 @@ const TABLES = [
   "services",
   "cameras",
   "camera_access_grants",
+  "camera_signals",
   "walks",
   "walk_points",
   "schema_migrations",

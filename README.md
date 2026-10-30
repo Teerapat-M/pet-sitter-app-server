@@ -20,7 +20,7 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 
 | Phase | What |
 |-------|------|
-| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, `users.last_seen_at` + `conversations.booking_id` in `005`, booking Phase 3 columns in `006`, walk unique-index + `NOTIFY` in `007`, and CCTV `NOTIFY` / grant backfill in `008`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
+| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, `users.last_seen_at` + `conversations.booking_id` in `005`, booking Phase 3 columns in `006`, walk unique-index + `NOTIFY` in `007`, CCTV `NOTIFY` / grant backfill in `008`, and short-lived signalling rows in `009`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
 | **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. First-visit onboarding: skippable welcome modal plus a 3–4 step walkthrough of services, booking, CCTV and GPS (frames D18/M18 from Penpot). Seen flag in `localStorage` and `users.onboarding_seen_at`; replay from the menu. |
 | **3 — Services and booking** | Boarding, dog walking, and in-home (visit or overnight). Quote + create ignore client totals; overlap locked in a transaction; Stripe TEST Checkout + signed webhook; sitter accept/decline; `waiting_confirm → waiting_service → in_service → completed` (or `cancelled`). Conversation `booking_id` set on create. See `docs/phase3-api.md`. |
 | **4 — Live GPS walks** | Walker posts points every 5–10s (batches OK) while a dog-walking booking is `in_service`. Owner live view is SSE (same LISTEN/NOTIFY stack as chat — see `docs/phase4-api.md`). Summary (distance, duration, start/end) is stored when the walk ends (`in_service → completed`). |
@@ -120,7 +120,8 @@ pet-sitter-app-server/
 │       ├── 005_conversation_booking_and_presence.sql
 │       ├── 006_booking_phase3.sql
 │       ├── 007_walk_tracking.sql
-│       └── 008_cctv_webrtc.sql
+│       ├── 008_cctv_webrtc.sql
+│       └── 009_camera_signals.sql
 ├── docs/
 │   ├── phase3-api.md           # Phase 3 request/response contract
 │   ├── phase4-api.md           # Phase 4 GPS walk contract (SSE + Leaflet)
@@ -528,7 +529,7 @@ CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db
 - **`GET /api/users`** — Public list endpoint (consider restricting in production)
 - **Dual DB pool config** — `repositories/db.mjs` vs `utils/db.mjs` (both use `DATABASE_URL`)
 - **LISTEN/NOTIFY** — requires a session connection. Set `LISTEN_DATABASE_URL` to the session pooler (5432) or a direct URI when `DATABASE_URL` is the Supabase transaction pooler (port 6543). In production, a missing or transaction-pooler `LISTEN_DATABASE_URL` fails at boot. CCTV signalling uses the same listener pair as chat/walk.
-- **CCTV live sessions** — WebRTC session records are **in-memory on a single Render instance** (demo). Caps: 8 viewers per camera, **2 sessions per owner per camera**. A second instance would not share the map.
+- **CCTV live sessions** — WebRTC session records are **in-memory on a single Render instance** (demo). Caps: 8 viewers per camera, **2 sessions per owner per camera**. A second instance would not share the map. Signalling bodies live in `camera_signals` (~5 min TTL); `pg_notify` carries only the row id.
 
 ---
 
