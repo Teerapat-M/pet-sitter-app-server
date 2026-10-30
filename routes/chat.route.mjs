@@ -45,12 +45,68 @@ chatRouter.post("/", chatController.createConversation);
  * /api/conversations:
  *   get:
  *     summary: List my conversations
+ *     description: |
+ *       Each thread includes bookingId and a booking summary (null if unlinked),
+ *       otherUser.lastSeenAt / isOnline, and otherUser.phone only when the viewer
+ *       has a confirmed (`waiting_service`) or in-service booking with that user.
+ *       Dates are `{ date, startTime, endTime }` for same-day bookings, otherwise
+ *       `{ start, end, startTime, endTime }`. isOnline is true when the other user
+ *       has an open SSE connection or lastSeenAt is within two minutes.
  *     tags: [Chat]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Conversation list
+ *         description: Conversation list with booking summary and presence
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: string }
+ *                       ownerId: { type: string, format: uuid }
+ *                       sitterId: { type: string, format: uuid }
+ *                       createdAt: { type: string, format: date-time }
+ *                       bookingId:
+ *                         type: string
+ *                         format: uuid
+ *                         nullable: true
+ *                       booking:
+ *                         nullable: true
+ *                         type: object
+ *                         properties:
+ *                           id: { type: string, format: uuid }
+ *                           service_name: { type: string, nullable: true }
+ *                           dates: { type: object, nullable: true }
+ *                           pets:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                               properties:
+ *                                 id: { type: integer }
+ *                                 name: { type: string }
+ *                           status: { type: string, nullable: true }
+ *                           transactionNo: { type: string, nullable: true }
+ *                       otherUser:
+ *                         type: object
+ *                         properties:
+ *                           id: { type: string, format: uuid }
+ *                           name: { type: string }
+ *                           avatarUrl: { type: string, nullable: true }
+ *                           phone:
+ *                             type: string
+ *                             nullable: true
+ *                             description: Present only for waiting_service / in_service bookings
+ *                           lastSeenAt: { type: string, format: date-time, nullable: true }
+ *                           isOnline: { type: boolean }
+ *                       lastMessage: { type: string }
+ *                       lastSentAt: { type: string, format: date-time, nullable: true }
+ *                       unreadCount: { type: integer }
  *       401:
  *         description: Unauthorized
  */
