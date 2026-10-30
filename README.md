@@ -20,8 +20,8 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 
 | Phase | What |
 |-------|------|
-| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
-| **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. |
+| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, and `users.onboarding_seen_at` in `003`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
+| **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. First-visit onboarding: skippable welcome modal plus a 3–4 step walkthrough of services, booking, CCTV and GPS (frames D18/M18 from Penpot). Seen flag in `localStorage` and `users.onboarding_seen_at`; replay from the menu. |
 | **3 — Services and booking** | Boarding, dog walking, and in-home sitter (visit or overnight). New booking flows, prices from `services`, CCTV / walk actions on booking detail. |
 | **4 — Live GPS walks** | Walker posts points every 5–10s. Owner subscribes to the trail. Summary (distance, duration, polyline) is stored on the walk when it ends. |
 | **5 — CCTV** | Free WebRTC: sitter browser camera, Supabase Realtime signalling, short-lived signed access, `camera:status` event. Grants are limited to the booking window. |
@@ -112,7 +112,8 @@ pet-sitter-app-server/
 │   ├── seed.sql
 │   └── migrations/
 │       ├── 001_init.sql
-│       └── 002_services_cameras_walks.sql
+│       ├── 002_services_cameras_walks.sql
+│       └── 003_onboarding_seen_at.sql
 ├── package.json
 ├── routes/                 # HTTP route definitions
 │   ├── auth.route.mjs
@@ -450,7 +451,7 @@ npm run dev
 npm test
 ```
 
-Runs unit/integration tests under `utils/**/*.test.mjs`, `services/**/*.test.mjs`, and `db/**/*.test.mjs` (auth, OAuth, payout, bookings, Stripe helpers, migration file order).
+Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, Stripe helpers, migration file order).
 
 CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db:seed`, and `db:verify`. That check does not use a live Supabase project.
 

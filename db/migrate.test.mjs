@@ -8,6 +8,7 @@ describe("listMigrationFiles", () => {
     assert.deepEqual(files, [
       "001_init.sql",
       "002_services_cameras_walks.sql",
+      "003_onboarding_seen_at.sql",
     ]);
   });
 });

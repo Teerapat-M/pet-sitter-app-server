@@ -50,6 +50,17 @@ try {
     throw new Error("seed did not insert walk_points");
   }
 
+  const { rows: colRows } = await client.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'users'
+       AND column_name = 'onboarding_seen_at'`
+  );
+  if (!colRows[0]) {
+    throw new Error("users.onboarding_seen_at is missing");
+  }
+
   console.log(`ok: ${TABLES.length} tables, ${walkRows[0].n} walk_points`);
 } finally {
   await client.end();
