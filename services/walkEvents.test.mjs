@@ -64,6 +64,21 @@ describe("walk SSE", () => {
     });
     assert.equal(res.chunks.filter((row) => row.includes('"type":"point"')).length, 1);
 
+    publishWalkEvent({
+      type: "point",
+      bookingId: "b1",
+      startedAt: "2026-10-30T02:05:00+00:00",
+      point: {
+        lat: 13.73,
+        lng: 100.58,
+        recordedAt: "2026-10-30T02:09:08+00:00",
+      },
+    });
+    const last = res.chunks.at(-1);
+    assert.match(last, /"recordedAt":"2026-10-30T02:09:08.000Z"/);
+    assert.match(last, /"startedAt":"2026-10-30T02:05:00.000Z"/);
+    assert.doesNotMatch(last, /\+00:00/);
+
     cleanup();
     req.emit("close");
     assert.equal(walkStreamCount("b1"), 0);

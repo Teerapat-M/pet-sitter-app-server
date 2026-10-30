@@ -8,6 +8,7 @@ import {
   isTransactionPoolerUrl,
   listenClientConfig,
   listenDatabaseUrl,
+  assertProductionListenConfig,
 } from "./listenDb.mjs";
 
 const POOLER =
@@ -61,6 +62,62 @@ describe("isTransactionPoolerUrl", () => {
     assert.equal(isTransactionPoolerUrl(POOLER), true);
     assert.equal(isTransactionPoolerUrl(SESSION), false);
     assert.equal(isTransactionPoolerUrl(DIRECT), false);
+  });
+
+  it("detects a pooler host with pgbouncer=true even on 5432", () => {
+    assert.equal(
+      isTransactionPoolerUrl(`${SESSION}?pgbouncer=true`),
+      true
+    );
+    assert.equal(isTransactionPoolerUrl(`${DIRECT}?pgbouncer=true`), false);
+  });
+});
+
+describe("assertProductionListenConfig", () => {
+  const poolerEnv = {
+    NODE_ENV: "production",
+    DATABASE_URL: POOLER,
+  };
+
+  it("fails fast in production when DATABASE_URL is a transaction pooler and LISTEN_DATABASE_URL is unset", () => {
+    assert.throws(
+      () => assertProductionListenConfig(poolerEnv),
+      (err) => {
+        assert.match(err.message, /LISTEN_DATABASE_URL is required/);
+        assert.match(err.message, /6543|pgbouncer/i);
+        return true;
+      }
+    );
+    assert.throws(
+      () =>
+        assertProductionListenConfig({
+          NODE_ENV: "production",
+          DATABASE_URL: `${SESSION}?pgbouncer=true`,
+        }),
+      /LISTEN_DATABASE_URL is required/
+    );
+  });
+
+  it("allows production when LISTEN_DATABASE_URL is set or the query URL is not a pooler", () => {
+    assert.doesNotThrow(() =>
+      assertProductionListenConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: POOLER,
+        LISTEN_DATABASE_URL: SESSION,
+      })
+    );
+    assert.doesNotThrow(() =>
+      assertProductionListenConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: DIRECT,
+      })
+    );
+    assert.doesNotThrow(() =>
+      assertProductionListenConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: POOLER,
+      })
+    );
   });
 });
 
@@ -157,5 +214,13 @@ describe("listener wiring", () => {
     assert.doesNotMatch(walk, /pool\.connect\(\)/);
     assert.match(chat, /scheduleReconnect/);
     assert.match(walk, /scheduleReconnect/);
+  });
+
+  it("fails fast at boot via assertProductionListenConfig", () => {
+    const app = fs.readFileSync(
+      fileURLToPath(new URL("../app.mjs", import.meta.url)),
+      "utf8"
+    );
+    assert.match(app, /assertProductionListenConfig/);
   });
 });

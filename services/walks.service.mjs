@@ -2,8 +2,9 @@ import { walksRepository } from "../repositories/walks.repository.mjs";
 import { httpError } from "../utils/httpError.mjs";
 import {
   assertPartyAccess,
-  assertSitterAccess,
+  assertWalkerWriteAccess,
 } from "../utils/bookingAuth.mjs";
+import { utcIso } from "../utils/iso.mjs";
 import { encodeLatLngPolyline, sumPathMeters } from "../utils/geo.mjs";
 import {
   assertWalkPostRate,
@@ -19,10 +20,7 @@ function isDogWalking(booking) {
 }
 
 function toIso(value) {
-  if (value == null) return null;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
+  return utcIso(value);
 }
 
 function mapPoint(row) {
@@ -98,7 +96,7 @@ export function createWalksService({
       const startedAt = new Date(now());
       const walk = await walksRepo.withTransaction(async (query) => {
         const booking = await walksRepo.findBookingForWalk(bookingId, query);
-        assertSitterAccess(booking, userId);
+        assertWalkerWriteAccess(booking, userId);
         if (!isDogWalking(booking)) {
           throw httpError(400, "Walk tracking is for dog walking bookings");
         }
@@ -139,7 +137,7 @@ export function createWalksService({
 
       const result = await walksRepo.withTransaction(async (query) => {
         const booking = await walksRepo.findBookingForWalk(bookingId, query);
-        assertSitterAccess(booking, userId);
+        assertWalkerWriteAccess(booking, userId);
         if (!isDogWalking(booking)) {
           throw httpError(400, "Walk tracking is for dog walking bookings");
         }
@@ -177,10 +175,10 @@ export function createWalksService({
     },
 
     async endWalk(userId, bookingId) {
-      const endedAt = new Date(now());
+      const wallClockEnd = new Date(now());
       const ended = await walksRepo.withTransaction(async (query) => {
         const booking = await walksRepo.findBookingForWalk(bookingId, query);
-        assertSitterAccess(booking, userId);
+        assertWalkerWriteAccess(booking, userId);
         if (!isDogWalking(booking)) {
           throw httpError(400, "Walk tracking is for dog walking bookings");
         }
@@ -205,11 +203,20 @@ export function createWalksService({
         const distanceM = mapped.length
           ? sumPathMeters(mapped)
           : Number(walk.distance_m);
+        const lastPointAt = mapped.length
+          ? new Date(mapped[mapped.length - 1].recordedAt)
+          : null;
+        const endedAt =
+          lastPointAt && !Number.isNaN(lastPointAt.getTime())
+            ? lastPointAt
+            : wallClockEnd;
         const startedAt = walk.started_at ?? mapped[0]?.recordedAt ?? endedAt;
-        const durationS = Math.max(
-          0,
-          Math.round((endedAt.getTime() - new Date(startedAt).getTime()) / 1000)
-        );
+        const durationS = mapped.length
+          ? Math.max(
+              0,
+              Math.round((endedAt.getTime() - new Date(startedAt).getTime()) / 1000)
+            )
+          : 0;
         const polyline = encodeLatLngPolyline(mapped);
         const summary = formatSummaryText(distanceM, durationS);
         const updated = await walksRepo.endWalk(

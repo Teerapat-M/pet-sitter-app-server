@@ -3,7 +3,7 @@
 Client build target for live dog-walking trails. Auth: `Authorization: Bearer <access_token>`.
 Base: `/api`. Coordinates are WGS84 decimal degrees for **Leaflet + OSM** (`L.polyline` / `L.circleMarker` on `lat`/`lng`).
 
-Walker (the booking’s sitter) posts a point every 5–10 seconds while the **dog_walking** booking is `in_service`. Batches are accepted (reconnect / background flush). Only the booking owner and sitter may read the trail; everyone else gets `404` (same hide-existence pattern as booking detail).
+Walker (the booking’s sitter) posts a point every 5–10 seconds while the **dog_walking** booking is `in_service`. Batches are accepted (reconnect / background flush). Only the booking owner and sitter may read the trail; everyone else gets `404` (same hide-existence pattern as booking detail). The owner is a known party on walker write endpoints (`start` / `points` / `end`) and gets `403`.
 
 ---
 
@@ -63,9 +63,10 @@ Sanity checks (bad points are **skipped**, not 500):
 |------|--------|
 | `lat` / `lng` | −90…90 / −180…180 |
 | `accuracy` | 0…5000 m (optional) |
-| `recordedAt` | ISO-8601; not more than 30s in the future; not before walk start |
+| `recordedAt` | UTC ISO-8601 with `Z` (same as REST); not more than 30s in the future; not before walk start |
 | interval | ≥ 2 seconds between kept points (client target 5–10s) |
 | speed | drop hops faster than 20 m/s (~72 km/h GPS jump) |
+| max walk length | 6 hours from `startedAt`; later points are skipped |
 | batch | ≤ 60 points |
 | HTTP | ≤ 20 posts / minute / walk → `429` |
 
@@ -73,7 +74,7 @@ Sanity checks (bad points are **skipped**, not 500):
 
 `POST /api/sitters/bookings/:id/walk/end`
 
-Recomputes distance (haversine), duration, start/end coordinates, and a `lat,lng|…` polyline. Booking becomes `completed`.
+Recomputes distance (haversine), **duration from start to the last kept point’s `recordedAt`**, start/end coordinates, and a `lat,lng|…` polyline. Booking becomes `completed`. A walk longer than **6 hours** from `startedAt` drops further points (see sanity table).
 
 ---
 
@@ -96,6 +97,8 @@ data: {"type":"point","bookingId":"…","walkId":"…","point":{"id":12,"lat":13
 
 data: {"type":"ended","bookingId":"…","walkId":"…","walkStatus":"ended","distanceM":640,"durationS":420}
 ```
+
+Timestamps on SSE payloads (`recordedAt`, `startedAt`, `endedAt`) are UTC ISO-8601 with a `Z` suffix, same as REST.
 
 Keepalive comments (`:` every 15s) match chat. Plot each `point` on OSM; on `ended` freeze the line and load history if you need the full trail.
 
@@ -133,7 +136,7 @@ Keepalive comments (`:` every 15s) match chat. Plot each `point` on OSM; on `end
 | Actor | start / points / end | GET walk / points / events |
 |-------|----------------------|----------------------------|
 | Booking sitter | yes | yes |
-| Booking owner | `404` | yes |
+| Booking owner | `403` | yes |
 | Anyone else | `404` | `404` |
 | Unauthenticated | `401` | `401` |
 

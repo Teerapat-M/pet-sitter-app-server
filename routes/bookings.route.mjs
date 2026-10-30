@@ -171,6 +171,8 @@ bookingsRouter.patch(
  *         description: Walk is live
  *       400:
  *         description: Booking is not an in-service dog walk
+ *       403:
+ *         description: Booking owner (known party) cannot start the walk
  *       404:
  *         description: Booking not found
  */
@@ -205,6 +207,8 @@ bookingsRouter.post(
  *         description: Accepted points (outliers skipped)
  *       400:
  *         description: Invalid or empty batch
+ *       403:
+ *         description: Booking owner (known party) cannot post points
  *       429:
  *         description: Too many posts
  */
@@ -233,6 +237,8 @@ bookingsRouter.post(
  *         description: Walk ended; booking is completed
  *       400:
  *         description: No live walk
+ *       403:
+ *         description: Booking owner (known party) cannot end the walk
  */
 bookingsRouter.post(
   "/:id/walk/end",

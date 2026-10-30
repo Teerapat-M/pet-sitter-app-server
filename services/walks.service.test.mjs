@@ -137,10 +137,10 @@ describe("walksService authz and status gating", () => {
     }
   });
 
-  it("404s walker writes for the owner", async () => {
+  it("403s walker writes for the owner (known party) and 404s others", async () => {
     const state = { booking: dogWalkingBooking(), walk: liveWalk(), points: [] };
     const service = createWalksService({ walksRepo: fakeRepo(state), now: () => NOW });
-    await assert.rejects(() => service.startWalk(OWNER, BOOKING_ID), (err) => err.statusCode === 404);
+    await assert.rejects(() => service.startWalk(OWNER, BOOKING_ID), (err) => err.statusCode === 403);
     await assert.rejects(
       () =>
         service.postPoints(OWNER, BOOKING_ID, {
@@ -148,9 +148,9 @@ describe("walksService authz and status gating", () => {
           lng: 100.58,
           recordedAt: "2026-10-30T02:09:00.000Z",
         }),
-      (err) => err.statusCode === 404
+      (err) => err.statusCode === 403
     );
-    await assert.rejects(() => service.endWalk(OWNER, BOOKING_ID), (err) => err.statusCode === 404);
+    await assert.rejects(() => service.endWalk(OWNER, BOOKING_ID), (err) => err.statusCode === 403);
   });
 
   it("lets the owner read", async () => {
@@ -243,6 +243,7 @@ describe("walksService authz and status gating", () => {
     assert.equal(result.accepted, 2);
     assert.equal(result.skipped, 1);
     assert.ok(result.distanceM > 0);
+    assert.match(result.points[0].recordedAt, /Z$/);
   });
 
   it("ends the walk, stores distance/duration, and completes the booking", async () => {
@@ -271,10 +272,13 @@ describe("walksService authz and status gating", () => {
     assert.equal(ended.status, "ended");
     assert.equal(state.booking.status, "completed");
     assert.ok(ended.distanceM > 111 && ended.distanceM < 112);
-    assert.equal(ended.durationS, 15 * 60);
+    assert.equal(ended.durationS, 5 * 60);
+    assert.equal(ended.endedAt, "2026-10-30T02:10:00.000Z");
     assert.match(ended.summary, /km/);
     assert.ok(ended.start);
     assert.ok(ended.end);
+    assert.match(ended.startedAt, /Z$/);
+    assert.match(ended.endedAt, /Z$/);
   });
 
   it("returns history points and summary for owner and sitter", async () => {

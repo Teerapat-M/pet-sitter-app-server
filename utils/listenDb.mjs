@@ -3,13 +3,54 @@ import { sslForDatabaseUrl } from "./pgSsl.mjs";
 
 const { Client } = pg;
 
+function parsePgUrl(connectionString) {
+  try {
+    return new URL(connectionString);
+  } catch {
+    return null;
+  }
+}
+
+function hasPgBouncerParam(url, raw) {
+  if (url) {
+    const value = url.searchParams.get("pgbouncer");
+    if (value == null || value === "") return false;
+    return !["0", "false", "off"].includes(String(value).toLowerCase());
+  }
+  return /(?:\?|&)pgbouncer=/i.test(String(raw ?? ""));
+}
+
+function isPoolerHost(url, raw) {
+  const host = url
+    ? String(url.hostname ?? "").toLowerCase()
+    : String(raw ?? "").toLowerCase();
+  return host.includes("pooler") || host.includes("pgbouncer");
+}
+
 /** Supabase transaction pooler — PgBouncer transaction mode cannot LISTEN. */
 export function isTransactionPoolerUrl(connectionString) {
   if (!connectionString) return false;
-  try {
-    return new URL(connectionString).port === "6543";
-  } catch {
-    return /:6543(?:\/|\?|$)/.test(String(connectionString));
+  const raw = String(connectionString);
+  const url = parsePgUrl(raw);
+  const port = url?.port || (raw.match(/:(\d+)(?:\/|\?|$)/) ?? [])[1];
+  if (port === "6543") return true;
+  return isPoolerHost(url, raw) && hasPgBouncerParam(url, raw);
+}
+
+const PRODUCTION_LISTEN_ERROR =
+  "LISTEN_DATABASE_URL is required in production when DATABASE_URL is a transaction pooler (port 6543, or a pooler host with pgbouncer). Set it to the session pooler (5432) or a direct URI so chat and walk SSE can LISTEN.";
+
+/** Fail fast at boot: production + transaction-pooler DATABASE_URL needs a session LISTEN URI. */
+export function assertProductionListenConfig(env = process.env) {
+  if (String(env.NODE_ENV ?? "").toLowerCase() !== "production") {
+    return;
+  }
+  if (String(env.LISTEN_DATABASE_URL ?? "").trim()) {
+    return;
+  }
+  const databaseUrl = String(env.DATABASE_URL ?? "").trim();
+  if (isTransactionPoolerUrl(databaseUrl)) {
+    throw new Error(PRODUCTION_LISTEN_ERROR);
   }
 }
 

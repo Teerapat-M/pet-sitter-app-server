@@ -4,6 +4,7 @@ import {
   isTransactionPoolerUrl,
   listenClientConfig,
 } from "../utils/listenDb.mjs";
+import { utcIsoFields } from "../utils/iso.mjs";
 
 const CHANNEL = "walk_events";
 const clients = new Map();
@@ -28,14 +29,43 @@ function removeClient(bookingId, res) {
   if (set.size === 0) clients.delete(key);
 }
 
+export function normalizeWalkSsePayload(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  const next = utcIsoFields(payload, ["startedAt", "endedAt", "recordedAt"]);
+  if (next.point && typeof next.point === "object") {
+    next.point = utcIsoFields(next.point, ["recordedAt"]);
+  }
+  if (Array.isArray(next.points)) {
+    next.points = next.points.map((point) =>
+      point && typeof point === "object"
+        ? utcIsoFields(point, ["recordedAt"])
+        : point
+    );
+  }
+  if (next.walk && typeof next.walk === "object") {
+    next.walk = utcIsoFields(next.walk, ["startedAt", "endedAt"]);
+    if (next.walk.summary && typeof next.walk.summary === "object") {
+      next.walk.summary = utcIsoFields(next.walk.summary, [
+        "startedAt",
+        "endedAt",
+      ]);
+    }
+  }
+  if (next.summary && typeof next.summary === "object") {
+    next.summary = utcIsoFields(next.summary, ["startedAt", "endedAt"]);
+  }
+  return next;
+}
+
 export function publishWalkEvent(payload) {
-  const key = bookingKey(payload?.bookingId);
+  const normalized = normalizeWalkSsePayload(payload);
+  const key = bookingKey(normalized?.bookingId);
   const set = clients.get(key);
   if (!set) return 0;
   let sent = 0;
   for (const res of [...set]) {
     try {
-      sendEvent(res, payload);
+      sendEvent(res, normalized);
       sent += 1;
     } catch {
       removeClient(key, res);
@@ -143,7 +173,10 @@ export function subscribeWalkEvents(bookingId, req, res, snapshot = null) {
   }
   set.add(res);
 
-  sendEvent(res, snapshot ?? { type: "connected", bookingId: key });
+  sendEvent(
+    res,
+    normalizeWalkSsePayload(snapshot ?? { type: "connected", bookingId: key })
+  );
 
   const ping = setInterval(() => {
     try {

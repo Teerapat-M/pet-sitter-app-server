@@ -18,6 +18,7 @@ import { startWalkListener } from "./services/walkEvents.mjs";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./swagger.mjs";
 import { corsOptions } from "./utils/corsOrigins.mjs";
+import { assertProductionListenConfig } from "./utils/listenDb.mjs";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -75,6 +76,8 @@ app.use((error, req, res, next) => {
   const statusCode = error.statusCode || 500;
   res.status(statusCode).json({ message: error.message || "Internal Server Error" });
 });
+
+assertProductionListenConfig();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`);

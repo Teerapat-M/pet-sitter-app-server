@@ -26,6 +26,19 @@ export function assertSitterAccess(booking, userId) {
   }
 }
 
+/** Walker writes: owner is a known party (403); strangers get 404. */
+export function assertWalkerWriteAccess(booking, userId) {
+  if (!booking) {
+    throw httpError(404, "Booking not found");
+  }
+  if (isBookingOwner(booking, userId) && !isBookingSitter(booking, userId)) {
+    throw httpError(403, "Only the assigned sitter can update this walk");
+  }
+  if (!isBookingSitter(booking, userId)) {
+    throw httpError(404, "Booking not found");
+  }
+}
+
 export function assertPartyAccess(booking, userId) {
   if (!booking || !isBookingParty(booking, userId)) {
     throw httpError(404, "Booking not found");
