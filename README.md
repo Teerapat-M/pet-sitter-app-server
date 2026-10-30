@@ -52,7 +52,7 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 
 - **Authentication** — Email register/login via Supabase Auth; Google/Facebook OAuth session (`/me`, `/oauth/complete`)
 - **Password recovery** — Forgot-password email + reset flow
-- **Users & pets** — Owner profiles and pet CRUD with avatar upload
+- **Users & pets** — Owner profiles and pet CRUD with avatar upload; public `GET /api/pet-types`
 - **Sitters** — Public search/list, profile management, availability, reviews
 - **Bookings** — Owner create (cash or Stripe); sitter status workflow; cancel, reschedule, review, report
 - **Payments** — Stripe PaymentIntent (manual capture on sitter confirm); cash payout on `in_service`
@@ -120,6 +120,7 @@ pet-sitter-app-server/
 │   ├── auth.route.mjs
 │   ├── users.route.mjs
 │   ├── pets.route.mjs
+│   ├── petTypes.route.mjs
 │   ├── sitters.route.mjs
 │   ├── bookings.route.mjs      # Sitter bookings (nested under /sitters)
 │   ├── ownerBookings.route.mjs
@@ -308,6 +309,12 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | GET | `/:id` | Bearer | Pet detail |
 | PUT | `/:id` | Bearer | Update pet |
 | DELETE | `/:id` | Bearer | Delete pet |
+
+### Pet types — `/api/pet-types`
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/` | — | List pet types (`id`, `name`, ordered by `id`) |
 
 ### Sitters — `/api/sitters`
 
