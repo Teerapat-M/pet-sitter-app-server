@@ -1,7 +1,7 @@
 import { httpError } from "./httpError.mjs";
+import { isValidEmail } from "./authValidation.mjs";
 
 const EXPERIENCE_VALUES = new Set(["0-2", "3-5", "5+"]);
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.com$/i;
 
 // validate แค่ข้อมูลพื้นฐานของ sitter (กล่อง 1)
 export function validateSitterBasicBody(body) {
@@ -33,8 +33,8 @@ export function validateSitterBasicBody(body) {
   if (!email) {
     throw httpError(400, "Email is required");
   }
-  if (!EMAIL_PATTERN.test(email)) {
-    throw httpError(400, "Email must include @ and end with .com");
+  if (!isValidEmail(email)) {
+    throw httpError(400, "Invalid email address");
   }
 
   const idNumber = String(body.id_number ?? "").trim();

@@ -7,6 +7,7 @@ import {
   buildServiceQuote,
   hasConflict,
   requireInHomeAddress,
+  resolveReschedulePricing,
   resolveServiceWindow,
 } from "./bookingQuote.mjs";
 
@@ -322,6 +323,38 @@ describe("dogs only and in-home address", () => {
       ownerAddress: null,
       accessInstructions: null,
     });
+  });
+});
+
+describe("resolveReschedulePricing", () => {
+  it("recomputes boarding from the offering (2 nights × 1200 = 2400)", () => {
+    const result = resolveReschedulePricing(
+      {
+        service_id: "svc-board",
+        service_type: "boarding",
+        service_mode: null,
+        service_duration_minutes: null,
+        service_unit_price: 1200,
+        pet_count: 1,
+        start_time: "12:00",
+        end_time: "12:00",
+      },
+      { checkIn: "2026-11-01", checkOut: "2026-11-03" }
+    );
+    assert.equal(result.totalPrice, 2400);
+    assert.equal(result.duration, 2);
+    assert.equal(result.durationUnit, "nights");
+    assert.equal(result.startDate, "2026-11-01");
+    assert.equal(result.endDate, "2026-11-03");
+  });
+
+  it("keeps legacy nightly rates when there is no service_id", () => {
+    const result = resolveReschedulePricing(
+      { pet_count: 1 },
+      { startDate: "2026-11-01", endDate: "2026-11-03" }
+    );
+    assert.equal(result.totalPrice, 2000);
+    assert.equal(result.durationUnit, "Day");
   });
 });
 

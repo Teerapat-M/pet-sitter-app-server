@@ -1,6 +1,7 @@
 import connectionPool from "../utils/db.mjs";
 import { httpError } from "../utils/httpError.mjs";
 import { ACTIVE_BOOKING_STATUSES } from "../utils/bookingStatus.mjs";
+import { lockSitterSlot } from "../utils/sitterLock.mjs";
 
 /** Keep Pool/Client `this` — do not destructure `{ query } = pool`. */
 function bindQuery(client) {
@@ -441,42 +442,71 @@ export const bookingsRepository = {
     return rows[0] ?? null;
   },
 
-  // ใช้โดย rescheduleOwnerBooking — อัปเดตวัน/เวลา/ระยะเวลา/ราคาของ booking เดิม
-  // (ราคาถูกคำนวณใหม่โดย service ก่อนเรียกมาที่นี่แล้ว)
+  // ใช้โดย rescheduleOwnerBooking — lock sitter slot, reject overlap, then update
   async updateScheduleByIdAndOwnerId(
     ownerId,
     bookingId,
+    sitterId,
     { startDate, endDate, startTime, endTime, duration, durationUnit, totalPrice }
   ) {
-    const { rows } = await connectionPool.query(
-      `
-      UPDATE bookings
-      SET start_date = $3::date,
-          end_date = $4::date,
-          start_time = $5::time,
-          end_time = $6::time,
-          duration = $7,
-          duration_unit = $8,
-          total_price = $9,
-          updated_at = NOW()
-      WHERE id = $1
-        AND owner_id = $2
-      RETURNING id, start_date, end_date, start_time, end_time, duration, duration_unit, total_price, status
-      `,
-      [
-        bookingId,
-        ownerId,
+    const client = await connectionPool.connect();
+    const query = bindQuery(client);
+
+    try {
+      await query("BEGIN");
+      await lockSitterSlot(query, sitterId);
+
+      const { rows: overlapRows } = await query(OVERLAP_SQL, [
+        sitterId,
         startDate,
         endDate,
         startTime,
         endTime,
-        duration,
-        durationUnit,
-        totalPrice,
-      ]
-    );
+        bookingId,
+      ]);
+      if (overlapRows[0]) {
+        throw httpError(
+          409,
+          "This date and time is already booked. Please choose another slot."
+        );
+      }
 
-    return rows[0] ?? null;
+      const { rows } = await query(
+        `
+        UPDATE bookings
+        SET start_date = $3::date,
+            end_date = $4::date,
+            start_time = $5::time,
+            end_time = $6::time,
+            duration = $7,
+            duration_unit = $8,
+            total_price = $9,
+            updated_at = NOW()
+        WHERE id = $1
+          AND owner_id = $2
+        RETURNING id, start_date, end_date, start_time, end_time, duration, duration_unit, total_price, status
+        `,
+        [
+          bookingId,
+          ownerId,
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+          duration,
+          durationUnit,
+          totalPrice,
+        ]
+      );
+
+      await query("COMMIT");
+      return rows[0] ?? null;
+    } catch (error) {
+      await query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 
   // owner booking — lock sitter row set, reject overlap, then insert
@@ -506,6 +536,7 @@ export const bookingsRepository = {
 
     try {
       await query("BEGIN");
+      await lockSitterSlot(query, sitterId);
 
       await query(
         `SELECT id

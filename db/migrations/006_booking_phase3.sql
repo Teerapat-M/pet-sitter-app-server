@@ -34,6 +34,17 @@ ALTER TABLE public.bookings
 ALTER TABLE public.bookings
   ADD COLUMN IF NOT EXISTS access_instructions text;
 
+-- Keep one conversation per booking_id (lowest id); null the rest so the
+-- unique index can be created on databases that already have duplicates.
+UPDATE public.conversations AS c
+SET booking_id = NULL
+WHERE c.booking_id IS NOT NULL
+  AND c.id <> (
+    SELECT MIN(c2.id)
+    FROM public.conversations AS c2
+    WHERE c2.booking_id = c.booking_id
+  );
+
 CREATE UNIQUE INDEX IF NOT EXISTS conversations_one_booking_idx
   ON public.conversations (booking_id)
   WHERE booking_id IS NOT NULL;

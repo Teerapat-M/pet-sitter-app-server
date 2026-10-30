@@ -14,6 +14,7 @@ import {
   buildServiceQuote,
   hasConflict,
   requireInHomeAddress,
+  resolveReschedulePricing,
 } from "./bookingQuote.mjs";
 import {
   shouldMarkCashPaidOnStatusChange,
@@ -266,36 +267,15 @@ export const bookingsService = {
 
     assertOwnerCanReschedule(booking.status);
 
-    const { startDate, endDate } = resolveBookingDateRange(body);
-    const { startTime, endTime } = resolveBookingTimes({
-      startDate,
-      endDate,
-      startTime: body?.startTime,
-      endTime: body?.endTime,
-    });
-
-    const overlapping = await bookingsRepository.hasOverlappingBooking({
-      sitterId: booking.sitter_id,
+    const {
       startDate,
       endDate,
       startTime,
       endTime,
-      excludeBookingId: bookingId,
-    });
-    if (overlapping) {
-      throw httpError(
-        409,
-        "This date and time is already booked. Please choose another slot."
-      );
-    }
-
-    const { duration, durationUnit, totalPrice } = resolveBookingPricing({
-      startDate,
-      endDate,
-      startTime,
-      endTime,
-      petCount: booking.pet_count,
-    });
+      duration,
+      durationUnit,
+      totalPrice,
+    } = resolveReschedulePricing(booking, body);
 
     // Stripe already authorized the original amount — capture later pulls that
     // exact amount, so a card-paid booking can only move to a slot priced the
@@ -311,15 +291,20 @@ export const bookingsService = {
       );
     }
 
-    return bookingsRepository.updateScheduleByIdAndOwnerId(ownerId, bookingId, {
-      startDate,
-      endDate,
-      startTime,
-      endTime,
-      duration,
-      durationUnit,
-      totalPrice,
-    });
+    return bookingsRepository.updateScheduleByIdAndOwnerId(
+      ownerId,
+      bookingId,
+      booking.sitter_id,
+      {
+        startDate,
+        endDate,
+        startTime,
+        endTime,
+        duration,
+        durationUnit,
+        totalPrice,
+      }
+    );
   },
 
   // Booking History — รีวิวได้เฉพาะ booking ที่จบงานแล้ว (status = success)

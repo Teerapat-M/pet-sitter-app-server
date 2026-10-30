@@ -2,6 +2,8 @@ import {
   doBookingsOverlap,
   isManyDayBooking,
   resolveBookingDateRange,
+  resolveBookingPricing,
+  resolveBookingTimes,
 } from "./bookingsCreate.mjs";
 import { resolveNights } from "../utils/bookingPricing.mjs";
 import { httpError } from "../utils/httpError.mjs";
@@ -23,6 +25,12 @@ export const DURATION_UNIT_HOURS = "hours";
 
 function trimString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asHm(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") return value.trim().slice(0, 5);
+  return String(value).slice(0, 5);
 }
 
 function requireDate(value, field) {
@@ -282,6 +290,69 @@ export function quoteFromOffering(window, offering, { petCount, hasCctv = false 
           ? window.hours
           : 1,
   };
+}
+
+/**
+ * Reschedule pricing: when the booking has a service_id, recompute from the
+ * offering (boarding 2 nights × 1200 = 2400). Legacy bookings without a
+ * service stay on hourly/nightly fallback rates.
+ */
+export function resolveReschedulePricing(booking, body) {
+  const serviceId = booking?.service_id ?? booking?.serviceId ?? null;
+  if (serviceId) {
+    const serviceType = booking.service_type ?? booking.serviceType;
+    const mode = booking.service_mode ?? booking.serviceMode ?? null;
+    const durationMinutes =
+      booking.service_duration_minutes ?? booking.serviceDurationMinutes ?? null;
+    const window = resolveServiceWindow({
+      ...body,
+      serviceType,
+      mode: body?.mode ?? mode,
+      durationMinutes: body?.durationMinutes ?? durationMinutes,
+      checkIn: body?.checkIn ?? body?.startDate,
+      checkOut: body?.checkOut ?? body?.endDate,
+      date: body?.date ?? body?.startDate,
+      startTime: body?.startTime ?? asHm(booking.start_time ?? booking.startTime),
+      endTime: body?.endTime ?? asHm(booking.end_time ?? booking.endTime),
+    });
+    const quote = quoteFromOffering(
+      window,
+      {
+        id: serviceId,
+        type: serviceType,
+        mode,
+        duration_minutes: durationMinutes,
+        price_amount: booking.service_unit_price ?? booking.serviceUnitPrice,
+        currency: booking.currency ?? "THB",
+      },
+      { petCount: Number(booking.pet_count ?? booking.petCount) || null }
+    );
+    return {
+      startDate: quote.startDate,
+      endDate: quote.endDate,
+      startTime: quote.startTime,
+      endTime: quote.endTime,
+      duration: quote.duration,
+      durationUnit: quote.durationUnit,
+      totalPrice: quote.totalPrice,
+    };
+  }
+
+  const { startDate, endDate } = resolveBookingDateRange(body);
+  const { startTime, endTime } = resolveBookingTimes({
+    startDate,
+    endDate,
+    startTime: body?.startTime,
+    endTime: body?.endTime,
+  });
+  const { duration, durationUnit, totalPrice } = resolveBookingPricing({
+    startDate,
+    endDate,
+    startTime,
+    endTime,
+    petCount: Number(booking?.pet_count ?? booking?.petCount) || 1,
+  });
+  return { startDate, endDate, startTime, endTime, duration, durationUnit, totalPrice };
 }
 
 /** Client totalPrice is ignored — quote is always recomputed from the offering. */

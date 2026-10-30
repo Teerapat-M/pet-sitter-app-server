@@ -45,6 +45,13 @@ describe("parseEmail", () => {
     });
   });
 
+  it("accepts a .demo address like the seeded owner", () => {
+    assert.deepEqual(parseEmail("arisa.owner@petsitter.demo"), {
+      ok: true,
+      value: "arisa.owner@petsitter.demo",
+    });
+  });
+
   it("rejects missing email", () => {
     assert.deepEqual(parseEmail(""), {
       ok: false,

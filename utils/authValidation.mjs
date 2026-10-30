@@ -1,7 +1,11 @@
 import { isValidPhone, normalizePhone } from "./phone.mjs";
 
-// รูปแบบอีเมลแบบง่าย — ใช้ร่วม register / forgot-password
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Local-part @ domain with a dot. Allows .com, .demo, etc. — not TLD-restricted.
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isValidEmail(email) {
+  return EMAIL_PATTERN.test(String(email ?? "").trim());
+}
 
 /**
  * ผลลัพธ์จากตัว parse:
@@ -34,7 +38,7 @@ export function parseEmail(email) {
     return { ok: false, message: "Email is required" };
   }
 
-  if (!EMAIL_PATTERN.test(String(email))) {
+  if (!isValidEmail(email)) {
     return { ok: false, message: "Invalid email" };
   }
 
