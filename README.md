@@ -529,7 +529,7 @@ CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db
 - **`GET /api/users`** — Public list endpoint (consider restricting in production)
 - **Dual DB pool config** — `repositories/db.mjs` vs `utils/db.mjs` (both use `DATABASE_URL`)
 - **LISTEN/NOTIFY** — requires a session connection. Set `LISTEN_DATABASE_URL` to the session pooler (5432) or a direct URI when `DATABASE_URL` is the Supabase transaction pooler (port 6543). In production, a missing or transaction-pooler `LISTEN_DATABASE_URL` fails at boot. CCTV signalling uses the same listener pair as chat/walk.
-- **CCTV live sessions** — WebRTC session records are **in-memory on a single Render instance** (demo). Caps: 8 viewers per camera, **2 sessions per owner per camera**. A second instance would not share the map. Signalling bodies live in `camera_signals` (~5 min TTL); `pg_notify` carries only the row id.
+- **CCTV live sessions** — WebRTC session records are **in-memory on a single Render instance** (demo). Caps: 8 viewers per camera, **2 sessions per owner per camera**. A second instance would not share the map. Signalling bodies live in `camera_signals` (~5 min TTL); `pg_notify` carries only the row id. Fetch is scoped to the recipient (`toUserId`); id-only / cross-user reads return nothing.
 
 ---
 

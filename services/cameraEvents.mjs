@@ -200,7 +200,7 @@ async function handleNotification(
   {
     now,
     listRecipients,
-    getSignal = (id) => camerasRepository.findSignal(id),
+    getSignal = (id, scope) => camerasRepository.findSignal(id, scope),
   } = {}
 ) {
   let parsed;
@@ -210,18 +210,31 @@ async function handleNotification(
     return;
   }
   if (parsed?.type === "signal-ref" && parsed.signalId) {
-    const row = await getSignal(parsed.signalId);
-    let body = row?.payload ?? null;
-    if (typeof body === "string") {
-      try {
-        body = JSON.parse(body);
-      } catch {
-        return;
+    let body = null;
+    const tried = new Set();
+    for (const sub of [...clients]) {
+      const key = `${sub.userId}\0${sub.bookingId ?? ""}\0${sub.sitterId ?? ""}`;
+      if (tried.has(key)) continue;
+      tried.add(key);
+      const row = await getSignal(parsed.signalId, {
+        userId: sub.userId,
+        sitterId: sub.sitterId || undefined,
+        bookingId: sub.bookingId || undefined,
+        cameraIds: sub.cameraIds || undefined,
+      });
+      let next = row?.payload ?? null;
+      if (typeof next === "string") {
+        try {
+          next = JSON.parse(next);
+        } catch {
+          continue;
+        }
+      }
+      if (next && typeof next === "object") {
+        body = next;
       }
     }
-    if (body && typeof body === "object") {
-      publishCameraEvent(body);
-    }
+    if (body) publishCameraEvent(body);
     return;
   }
   if (parsed?.type === "camera:status" && parsed.cameraId) {
@@ -267,7 +280,7 @@ function scheduleReconnect() {
 export async function startCameraListener({
   listRecipients = (cameraId, now) =>
     camerasRepository.listActiveGrantRecipients(cameraId, now),
-  getSignal = (id) => camerasRepository.findSignal(id),
+  getSignal = (id, scope) => camerasRepository.findSignal(id, scope),
 } = {}) {
   const previous = listenClient;
   listenClient = null;

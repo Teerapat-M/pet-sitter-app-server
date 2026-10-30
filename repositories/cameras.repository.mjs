@@ -17,6 +17,87 @@ const CAMERA_SELECT = `
   cameras.updated_at
 `;
 
+function scopeUserId(scope = {}) {
+  const userId = scope.userId ?? scope.toUserId;
+  if (userId == null || userId === "") return null;
+  return String(userId);
+}
+
+function asPayload(value) {
+  if (value == null) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return value;
+}
+
+/** True when a camera_signals row is addressed to this subscriber. */
+export function signalMatchesScope(row, scope = {}) {
+  if (!row) return false;
+  const userId = scopeUserId(scope);
+  if (!userId) return false;
+  const payload = asPayload(row.payload);
+  if (String(payload.toUserId ?? "") !== userId) return false;
+  if (scope.sitterId && String(payload.sitterId ?? "") !== String(scope.sitterId)) {
+    return false;
+  }
+  if (
+    scope.bookingId &&
+    String(row.booking_id ?? payload.bookingId ?? "") !== String(scope.bookingId)
+  ) {
+    return false;
+  }
+  if (
+    scope.sessionId &&
+    String(row.session_id ?? payload.sessionId ?? "") !== String(scope.sessionId)
+  ) {
+    return false;
+  }
+  const cameraId = String(row.camera_id ?? payload.cameraId ?? "");
+  if (scope.cameraId && cameraId !== String(scope.cameraId)) return false;
+  if (scope.cameraIds instanceof Set) {
+    if (scope.cameraIds.size === 0 || !scope.cameraIds.has(cameraId)) return false;
+  }
+  return true;
+}
+
+export function buildFindSignalQuery(signalId, scope = {}) {
+  const userId = scopeUserId(scope);
+  const params = [signalId, userId];
+  let sql = `
+    SELECT id, session_id, camera_id, booking_id, payload, created_at
+    FROM camera_signals
+    WHERE id = $1
+      AND payload->>'toUserId' = $2
+  `;
+  if (scope.sitterId) {
+    params.push(String(scope.sitterId));
+    sql += ` AND payload->>'sitterId' = $${params.length}`;
+  }
+  if (scope.bookingId) {
+    params.push(String(scope.bookingId));
+    sql += ` AND booking_id IS NOT DISTINCT FROM $${params.length}`;
+  }
+  if (scope.sessionId) {
+    params.push(String(scope.sessionId));
+    sql += ` AND session_id = $${params.length}`;
+  }
+  if (scope.cameraId) {
+    params.push(String(scope.cameraId));
+    sql += ` AND camera_id = $${params.length}`;
+  }
+  if (scope.cameraIds instanceof Set) {
+    params.push([...scope.cameraIds].map(String));
+    sql += ` AND camera_id = ANY($${params.length}::uuid[])`;
+  }
+  sql += " LIMIT 1";
+  return { sql, params };
+}
+
 export function createCamerasRepository({
   query = (...args) => connectionPool.query(...args),
 } = {}) {
@@ -225,14 +306,16 @@ export function createCamerasRepository({
       return rows[0];
     },
 
-    async findSignal(signalId, q = query) {
-      const { rows } = await q(
-        `SELECT id, session_id, camera_id, booking_id, payload, created_at
-         FROM camera_signals
-         WHERE id = $1
-         LIMIT 1`,
-        [signalId]
-      );
+    async findSignal(signalId, scope = {}, q = query) {
+      if (typeof scope === "function") {
+        q = scope;
+        scope = {};
+      }
+      if (!scopeUserId(scope)) {
+        return null;
+      }
+      const { sql, params } = buildFindSignalQuery(signalId, scope);
+      const { rows } = await q(sql, params);
       return rows[0] ?? null;
     },
 
