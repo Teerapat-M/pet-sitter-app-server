@@ -22,7 +22,7 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 |-------|------|
 | **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, and `users.last_seen_at` + `conversations.booking_id` in `005`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
 | **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. First-visit onboarding: skippable welcome modal plus a 3–4 step walkthrough of services, booking, CCTV and GPS (frames D18/M18 from Penpot). Seen flag in `localStorage` and `users.onboarding_seen_at`; replay from the menu. |
-| **3 — Services and booking** | Boarding, dog walking, and in-home sitter (visit or overnight). New booking flows, prices from `services`, CCTV / walk actions on booking detail. |
+| **3 — Services and booking** | Boarding, dog walking, and in-home (visit or overnight). Quote + create ignore client totals; overlap locked in a transaction; Stripe TEST Checkout + signed webhook; sitter accept/decline; `waiting_confirm → waiting_service → in_service → completed` (or `cancelled`). Conversation `booking_id` set on create. See `docs/phase3-api.md`. |
 | **4 — Live GPS walks** | Walker posts points every 5–10s. Owner subscribes to the trail. Summary (distance, duration, polyline) is stored on the walk when it ends. |
 | **5 — CCTV** | Free WebRTC: sitter browser camera, Supabase Realtime signalling, short-lived signed access, `camera:status` event. Grants are limited to the booking window. |
 
@@ -54,8 +54,8 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 - **Password recovery** — Forgot-password email + reset flow
 - **Users & pets** — Owner profiles and pet CRUD with avatar upload; public `GET /api/pet-types`
 - **Sitters** — Public search/list, profile management, availability, reviews
-- **Bookings** — Owner create (cash or Stripe); sitter status workflow; cancel, reschedule, review, report
-- **Payments** — Stripe PaymentIntent (manual capture on sitter confirm); cash payout on `in_service`
+- **Bookings** — Boarding / dog walking / in-home; server quote; owner create (cash or Stripe Checkout); sitter accept/decline and status workflow; cancel, reschedule, review, report
+- **Payments** — Stripe TEST Checkout Session (Phase 3) or PaymentIntent (legacy); webhook signature verification; cash payout on `in_service` / `completed`
 - **Payout** — Sitter earnings dashboard, Thai bank list, bank account + book-bank image upload
 - **Chat** — Owner–sitter messaging with image upload and SSE realtime events
 - **Notifications** — In-app notification list and read state
@@ -115,7 +115,10 @@ pet-sitter-app-server/
 │       ├── 002_services_cameras_walks.sql
 │       ├── 003_onboarding_seen_at.sql
 │       ├── 004_clip_camera_grants_on_reschedule.sql
-│       └── 005_conversation_booking_and_presence.sql
+│       ├── 005_conversation_booking_and_presence.sql
+│       └── 006_booking_phase3.sql
+├── docs/
+│   └── phase3-api.md           # Phase 3 request/response contract
 ├── package.json
 ├── routes/                 # HTTP route definitions
 │   ├── auth.route.mjs
@@ -203,8 +206,8 @@ curl http://localhost:4000/health
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only; Auth admin & storage (**never expose to FE**) |
 | `SUPABASE_JWKS_URL` | Yes | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
 | `FRONTEND_URL` | Yes | Comma-separated frontend origins for CORS (localhost / `127.0.0.1` on ports 3000 and 3001 are always allowed). First URL is the password-reset redirect base (no trailing `/`) |
-| `STRIPE_SECRET_KEY` | For payments | Stripe secret key |
-| `STRIPE_WEBHOOK_SECRET` | For webhooks | Webhook signing secret for `/api/webhooks/stripe` |
+| `STRIPE_SECRET_KEY` | For payments | Stripe **test** secret (`sk_test_…`). Never commit live keys. |
+| `STRIPE_WEBHOOK_SECRET` | For webhooks | Webhook signing secret (`whsec_…`) for `/api/webhooks/stripe` |
 | `PORT` | No | Default `4000` (Render sets this automatically) |
 
 See `.env.example` for a template with placeholder values.
@@ -328,7 +331,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | GET | `/me/payout/bank-account` | Sitter | Get bank account |
 | PUT | `/me/payout/bank-account` | Sitter | Update bank account |
 | POST | `/me/payout/book-bank-image` | Sitter | Upload book-bank image |
-| GET | `/:id` | — | Public sitter profile |
+| GET | `/:id` | — | Public sitter profile (`hasCctv`, `serviceOfferings`) |
 | GET | `/:id/reviews` | — | Sitter reviews |
 | GET | `/:id/availability` | — | Booking availability |
 
@@ -337,19 +340,23 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/` | Sitter | Booking list |
-| GET | `/:id` | Sitter | Booking detail |
-| PATCH | `/:id/status` | Sitter | Update status |
+| GET | `/:id` | Sitter | Booking detail (`has_cctv`, `owner_address`) |
+| POST | `/:id/accept` | Sitter | `waiting_confirm` → `waiting_service` |
+| POST | `/:id/decline` | Sitter | `waiting_confirm` → `cancelled` |
+| PATCH | `/:id/status` | Sitter | Enforced transitions; `in_service` → `completed` |
 
 ### Owner bookings — `/api/bookings`
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/` | Bearer | Create booking (cash \| stripe) |
+| POST | `/quote` | Bearer | Server-side price quote (`available`, `hasCctv`) |
+| POST | `/` | Bearer | Create booking (cash \| stripe). Phase 3 sends `serviceType`. |
+| POST | `/:id/checkout` | Bearer | Stripe TEST Checkout Session |
 | GET | `/owner` | Bearer | Booking history |
 | GET | `/owner/:id` | Bearer | Booking detail |
 | POST | `/owner/:id/cancel` | Bearer | Cancel booking |
 | POST | `/owner/:id/reschedule` | Bearer | Reschedule |
-| POST | `/owner/:id/review` | Bearer | Submit review |
+| POST | `/owner/:id/review` | Bearer | Submit review (`completed`) |
 | POST | `/owner/:id/report` | Bearer | Report issue |
 
 ### Banks — `/api/banks`
@@ -426,7 +433,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | FE env | `NEXT_PUBLIC_API_URL` → API base URL |
 | CORS allowed | `localhost:3000`, `localhost:3001`, `https://pet-sitter-app-client-khaki.vercel.app` |
 
-**Booking payment (Stripe):** `POST /api/bookings` returns `clientSecret` for Stripe.js; success state is `requires_capture` (manual capture on sitter confirm).
+**Booking payment (Stripe TEST):** Phase 3 `POST /api/bookings` with `serviceType` returns `checkoutUrl` (Checkout Session). Legacy create (no `serviceType`) returns `clientSecret` (PaymentIntent, manual capture on sitter confirm). Webhook `POST /api/webhooks/stripe` verifies `Stripe-Signature` and marks the payment paid. Full request/response shapes: [`docs/phase3-api.md`](docs/phase3-api.md).
 
 ---
 
@@ -450,7 +457,7 @@ npm run dev
 
 1. Set all required [environment variables](#-environment-variables) on Render
 2. Build command: `npm install`
-3. Start command: `npm start`
+3. Start command: `npm start` (binds `0.0.0.0:$PORT`)
 4. Health check path: `/health`
 5. **Stripe webhook:** `https://pet-sitter-app-server.onrender.com/api/webhooks/stripe`
 6. **Supabase:** Add production FE URL to Auth redirect allow list
@@ -464,7 +471,7 @@ npm run dev
 npm test
 ```
 
-Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, Stripe helpers, migration file order).
+Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, service pricing, conflicts, status transitions, role checks, Stripe webhook signature, migration file order).
 
 CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db:seed`, and `db:verify`. That check does not use a live Supabase project.
 

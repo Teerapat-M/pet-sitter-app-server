@@ -1,8 +1,8 @@
 export const PAYMENT_METHOD_CASH = "cash";
 export const PAYMENT_METHOD_STRIPE = "stripe";
 
-/** cash นับ earnings เมื่อ in_service/success + payments.paid */
-const CASH_EARNING_STATUSES = new Set(["in_service", "success"]);
+/** cash นับ earnings เมื่อ in_service/completed (legacy success) + payments.paid */
+const CASH_EARNING_STATUSES = new Set(["in_service", "success", "completed"]);
 
 export function isCashPayoutEligible({
   paymentMethod,

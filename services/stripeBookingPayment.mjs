@@ -1,6 +1,8 @@
 import { bookingsRepository } from "../repositories/bookings.repository.mjs";
 import { getStripe } from "../repositories/stripe.mjs";
 import { httpError } from "../utils/httpError.mjs";
+import { toStripeAmount } from "../utils/stripeAmount.mjs";
+import { parseFrontendOrigins } from "../utils/corsOrigins.mjs";
 
 const defaultDeps = {
   capture: (paymentToken) => getStripe().paymentIntents.capture(paymentToken),
@@ -29,7 +31,7 @@ export async function captureStripePaymentIntent(paymentToken, deps = defaultDep
 
 /** T03 — ยกเลิก PI ที่ยังไม่ capture */
 export async function cancelStripePaymentIntent(paymentToken, deps = defaultDeps) {
-  if (!paymentToken) {
+  if (!paymentToken || String(paymentToken).startsWith("cs_")) {
     return;
   }
 
@@ -44,5 +46,57 @@ export async function cancelStripePaymentIntent(paymentToken, deps = defaultDeps
       return;
     }
     throw httpError(402, error.message || "Failed to cancel Stripe payment");
+  }
+}
+
+export function checkoutUrls(bookingId, frontendUrl = process.env.FRONTEND_URL) {
+  const [origin] = parseFrontendOrigins(frontendUrl);
+  const base = origin || "http://localhost:3000";
+  return {
+    successUrl: `${base}/owner/bookings?checkout=success&bookingId=${bookingId}`,
+    cancelUrl: `${base}/owner/bookings?checkout=cancel&bookingId=${bookingId}`,
+  };
+}
+
+export async function createCheckoutSession({
+  bookingId,
+  amount,
+  successUrl,
+  cancelUrl,
+}) {
+  const urls = checkoutUrls(bookingId);
+  const session = await getStripe().checkout.sessions.create({
+    mode: "payment",
+    success_url: successUrl || urls.successUrl,
+    cancel_url: cancelUrl || urls.cancelUrl,
+    client_reference_id: String(bookingId),
+    metadata: { bookingId: String(bookingId) },
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: "thb",
+          unit_amount: toStripeAmount(amount),
+          product_data: { name: "Pet sitter booking" },
+        },
+      },
+    ],
+  });
+  return session;
+}
+
+/** Checkout is already captured — refund on decline/cancel. PI cancel is a no-op then. */
+export async function refundStripePaymentIfCaptured(paymentToken) {
+  if (!paymentToken || String(paymentToken).startsWith("cs_")) {
+    return;
+  }
+  try {
+    await getStripe().refunds.create({ payment_intent: paymentToken });
+  } catch (error) {
+    const code = error?.code ?? error?.raw?.code;
+    if (code === "resource_missing" || code === "charge_already_refunded") {
+      return;
+    }
+    throw httpError(402, error.message || "Failed to refund Stripe payment");
   }
 }

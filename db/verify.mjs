@@ -143,6 +143,28 @@ try {
     throw new Error("conversations.booking_id is missing");
   }
 
+  const { rows: phase3Cols } = await client.query(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'bookings'
+           AND column_name = 'owner_address'
+       ) AS has_owner_address,
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'bookings'
+           AND column_name = 'access_instructions'
+       ) AS has_access_instructions`
+  );
+  if (!phase3Cols[0]?.has_owner_address) {
+    throw new Error("bookings.owner_address is missing");
+  }
+  if (!phase3Cols[0]?.has_access_instructions) {
+    throw new Error("bookings.access_instructions is missing");
+  }
+
   await assertCameraGrantsClipAndRevoke(client);
 
   console.log(`ok: ${TABLES.length} tables, ${walkRows[0].n} walk_points`);

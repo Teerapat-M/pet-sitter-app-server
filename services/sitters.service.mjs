@@ -51,7 +51,22 @@ export const sittersService = {
       throw httpError(404, "Sitter profile not found");
     }
 
-    return sitter;
+    const rawOfferings = sitter.service_offerings ?? sitter.serviceOfferings ?? [];
+    let serviceOfferings = rawOfferings;
+    if (typeof serviceOfferings === "string") {
+      try {
+        serviceOfferings = JSON.parse(serviceOfferings);
+      } catch {
+        serviceOfferings = [];
+      }
+    }
+    if (!Array.isArray(serviceOfferings)) serviceOfferings = [];
+
+    return {
+      ...sitter,
+      hasCctv: Boolean(sitter.has_cctv ?? sitter.hasCctv),
+      serviceOfferings,
+    };
   },
 
   async getReviews(id, { rating = null, page = 1, limit = 5 } = {}) {

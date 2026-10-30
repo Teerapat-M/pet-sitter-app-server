@@ -227,4 +227,55 @@ export const bookingsController = {
       next(error);
     }
   },
+
+  async quote(req, res, next) {
+    try {
+      const quote = await bookingsService.quote(req.user, req.body);
+      return res.status(200).json({ data: quote });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async checkout(req, res, next) {
+    try {
+      const checkout = await bookingsService.createCheckout(
+        req.user.id,
+        req.params.id
+      );
+      return res.status(200).json({ data: checkout });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async acceptMyBooking(req, res, next) {
+    try {
+      const updated = await bookingsService.acceptMyBooking(
+        req.user.id,
+        req.params.id
+      );
+      return res.status(200).json({
+        message: "Booking accepted",
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async declineMyBooking(req, res, next) {
+    try {
+      const updated = await bookingsService.declineMyBooking(
+        req.user.id,
+        req.params.id
+      );
+      return res.status(200).json({
+        message: "Booking declined",
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 };

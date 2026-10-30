@@ -33,6 +33,17 @@ describe("isCashPayoutEligible", () => {
     );
   });
 
+  it("is true when cash booking is completed and paid", () => {
+    assert.equal(
+      isCashPayoutEligible({
+        paymentMethod: "cash",
+        bookingStatus: "completed",
+        paymentStatus: "paid",
+      }),
+      true
+    );
+  });
+
   it("is false before in_service", () => {
     assert.equal(
       isCashPayoutEligible({

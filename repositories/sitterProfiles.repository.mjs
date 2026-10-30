@@ -46,6 +46,8 @@ function toListItem(row) {
     experience: row.experience,
     latitude: row.latitude != null ? Number(row.latitude) : null,
     longitude: row.longitude != null ? Number(row.longitude) : null,
+    hasCctv: Boolean(row.has_cctv),
+    fromPrice: row.from_price != null ? Number(row.from_price) : null,
   };
 }
 
@@ -140,6 +142,17 @@ export const sitterProfilesRepository = {
         sitter_profiles.experience_years as experience,
         sitter_profiles.latitude,
         sitter_profiles.longitude,
+        exists (
+          select 1 from cameras
+          where cameras.sitter_id = sitter_profiles.user_id
+            and cameras.is_enabled = true
+        ) as has_cctv,
+        (
+          select min(services.price_amount)
+          from services
+          where services.sitter_id = sitter_profiles.user_id
+            and services.is_active = true
+        ) as from_price,
         (
           select sitter_photos.photo_url
           from sitter_photos
@@ -258,6 +271,30 @@ export const sitterProfilesRepository = {
         sitter_profiles.experience_years as experience,
         sitter_profiles.introduction,
         sitter_profiles.services,
+        exists (
+          select 1 from cameras
+          where cameras.sitter_id = sitter_profiles.user_id
+            and cameras.is_enabled = true
+        ) as has_cctv,
+        coalesce(
+          (
+            select json_agg(
+              json_build_object(
+                'id', services.id,
+                'type', services.type,
+                'mode', services.mode,
+                'durationMinutes', services.duration_minutes,
+                'priceAmount', services.price_amount,
+                'currency', services.currency
+              )
+              order by services.type, services.mode, services.duration_minutes
+            )
+            from services
+            where services.sitter_id = sitter_profiles.user_id
+              and services.is_active = true
+          ),
+          '[]'::json
+        ) as service_offerings,
         sitter_profiles.my_place,
         sitter_profiles.district,
         sitter_profiles.sub_district,

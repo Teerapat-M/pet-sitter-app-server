@@ -475,4 +475,10 @@ ON CONFLICT (id) DO UPDATE SET
 
 SELECT setval(pg_get_serial_sequence('public.notifications', 'id'), 2, true);
 
+UPDATE public.bookings
+SET
+  owner_address = '12 Sukhumvit 55, Khlong Tan Nuea, Watthana, Bangkok 10110',
+  access_instructions = 'Spare key in the lockbox by the side gate. Code 4821.'
+WHERE id = 'b0000003-0003-4003-8003-000000000003';
+
 COMMIT;

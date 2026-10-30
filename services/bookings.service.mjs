@@ -1,12 +1,20 @@
 import { bookingsRepository } from "../repositories/bookings.repository.mjs";
 import { petsRepository } from "../repositories/pets.repository.mjs";
 import { sitterProfilesRepository } from "../repositories/sitterProfiles.repository.mjs";
+import { servicesRepository } from "../repositories/services.repository.mjs";
+import { conversationsRepository } from "../repositories/conversations.repository.mjs";
 import { getStripe } from "../repositories/stripe.mjs";
 import {
   resolveBookingDateRange,
   resolveBookingPricing,
   resolveBookingTimes,
 } from "./bookingsCreate.mjs";
+import {
+  assertDogsOnly,
+  buildServiceQuote,
+  hasConflict,
+  requireInHomeAddress,
+} from "./bookingQuote.mjs";
 import {
   shouldMarkCashPaidOnStatusChange,
   shouldCaptureStripeOnConfirm,
@@ -15,6 +23,8 @@ import {
 import {
   captureStripePaymentIntent,
   cancelStripePaymentIntent,
+  createCheckoutSession,
+  refundStripePaymentIfCaptured,
 } from "./stripeBookingPayment.mjs";
 import { toStripeAmount } from "../utils/stripeAmount.mjs";
 import { reviewsRepository } from "../repositories/reviews.repository.mjs";
@@ -22,12 +32,13 @@ import { reportsRepository } from "../repositories/reports.repository.mjs";
 import { httpError } from "../utils/httpError.mjs";
 import { isOwnerProfileComplete } from "../middlewares/validateUsers.mjs";
 import { notificationsService } from "./notifications.service.mjs";
-
-const ALLOWED_TRANSITIONS = {
-  waiting_confirm: ["waiting_service", "cancelled"],
-  waiting_service: ["in_service"],
-  in_service: ["success"],
-};
+import { assertNotSelfBooking } from "../utils/bookingAuth.mjs";
+import {
+  assertOwnerCanCancel,
+  assertOwnerCanReschedule,
+  assertOwnerCanReview,
+  assertValidSitterTransition,
+} from "../utils/bookingStatus.mjs";
 
 const PAYMENT_METHODS = new Set(["cash", "stripe"]);
 
@@ -61,6 +72,36 @@ function parsePetTypes(value) {
   return [];
 }
 
+async function linkConversation(ownerId, sitterId, bookingId) {
+  const existing = await conversationsRepository.findByOwnerAndSitter(
+    ownerId,
+    sitterId
+  );
+  if (existing) {
+    return conversationsRepository.setBookingId(existing.id, bookingId);
+  }
+  return conversationsRepository.create({ ownerId, sitterId, bookingId });
+}
+
+function conversationIdOf(row) {
+  return row?.id != null ? String(row.id) : null;
+}
+
+async function reverseStripeIfNeeded(booking, nextStatus) {
+  if (
+    !shouldCancelStripePayment({
+      paymentMethod: booking.payment_method,
+      nextStatus,
+    })
+  ) {
+    return;
+  }
+  await cancelStripePaymentIntent(booking.payment_token);
+  if (booking.payment_status === "paid") {
+    await refundStripePaymentIfCaptured(booking.payment_token);
+  }
+}
+
 export const bookingsService = {
   async getMyBookings(sitterId, search, status, limit, offset) {
     return bookingsRepository.findManyBySitterId(
@@ -85,7 +126,7 @@ export const bookingsService = {
     return booking;
   },
 
-  async updateMyBookingStatus(sitterId, bookingId, nextStatus) {
+  async updateMyBookingStatus(sitterId, bookingId, requestedStatus) {
     const booking = await bookingsRepository.findByIdAndSitterId(
       sitterId,
       bookingId
@@ -95,27 +136,19 @@ export const bookingsService = {
       throw httpError(404, "Booking not found");
     }
 
-    const allowed = ALLOWED_TRANSITIONS[booking.status] ?? [];
-    if (!allowed.includes(nextStatus)) {
-      throw httpError(400, "Invalid status transition");
-    }
+    const nextStatus = assertValidSitterTransition(booking.status, requestedStatus);
 
-    // T03 — cancel ก่อนเปลี่ยน status
-    if (
-      shouldCancelStripePayment({
-        paymentMethod: booking.payment_method,
-        nextStatus,
-      })
-    ) {
-      await cancelStripePaymentIntent(booking.payment_token);
-    }
+    await reverseStripeIfNeeded(booking, nextStatus);
 
     // T03 — capture ก่อนเปลี่ยน status (fail แล้วไม่อัปเดต booking)
+    // Checkout already captured — skip if webhook marked paid.
     if (
       shouldCaptureStripeOnConfirm({
         paymentMethod: booking.payment_method,
         nextStatus,
-      })
+      }) &&
+      booking.payment_status !== "paid" &&
+      String(booking.payment_token ?? "").startsWith("pi_")
     ) {
       await captureStripePaymentIntent(booking.payment_token);
     }
@@ -197,18 +230,9 @@ export const bookingsService = {
       throw httpError(404, "Booking not found");
     }
 
-    if (booking.status !== "waiting_confirm") {
-      throw httpError(400, "Can only cancel a booking that is waiting for confirmation");
-    }
+    assertOwnerCanCancel(booking.status);
 
-    if (
-      shouldCancelStripePayment({
-        paymentMethod: booking.payment_method,
-        nextStatus: "cancelled",
-      })
-    ) {
-      await cancelStripePaymentIntent(booking.payment_token);
-    }
+    await reverseStripeIfNeeded(booking, "cancelled");
 
     const updated = await bookingsRepository.updateStatusByIdAndOwnerId(
       ownerId,
@@ -240,12 +264,7 @@ export const bookingsService = {
       throw httpError(404, "Booking not found");
     }
 
-    if (booking.status !== "waiting_confirm") {
-      throw httpError(
-        400,
-        "Can only change the date of a booking that is waiting for confirmation"
-      );
-    }
+    assertOwnerCanReschedule(booking.status);
 
     const { startDate, endDate } = resolveBookingDateRange(body);
     const { startTime, endTime } = resolveBookingTimes({
@@ -315,9 +334,7 @@ export const bookingsService = {
       throw httpError(404, "Booking not found");
     }
 
-    if (booking.status !== "success") {
-      throw httpError(400, "Can only review a completed booking");
-    }
+    assertOwnerCanReview(booking.status);
 
     if (booking.review) {
       throw httpError(409, "Booking already reviewed");
@@ -359,7 +376,81 @@ export const bookingsService = {
   // ผ่านหมดแล้วค่อย insert booking+pets+payment ใน transaction เดียว (ดู
   // bookingsRepository.createBookingWithPets) แล้วถ้าเป็น stripe จะสร้าง
   // PaymentIntent แบบ manual capture (authorize ไว้ก่อน, capture ตอน sitter confirm)
+  async quote(owner, body) {
+    const sitterId = typeof body?.sitterId === "string" ? body.sitterId.trim() : "";
+    if (!sitterId) {
+      throw httpError(400, "sitterId is required");
+    }
+
+    const sitter = await sitterProfilesRepository.findPublicById(sitterId);
+    if (!sitter) {
+      throw httpError(404, "Sitter profile not found");
+    }
+
+    const [offerings, hasCctv] = await Promise.all([
+      servicesRepository.listActiveBySitterId(sitterId),
+      servicesRepository.sitterHasCctv(sitterId),
+    ]);
+
+    let petCount = null;
+    let pets = [];
+    if (Array.isArray(body?.petIds) && body.petIds.length > 0 && owner?.id) {
+      const petIds = normalizePetIds(body.petIds);
+      pets = await petsRepository.findManyByIds(petIds, owner.id);
+      petCount = pets.length;
+    }
+
+    const quote = buildServiceQuote(body, offerings, { petCount, hasCctv });
+    if (quote.serviceType === "dog_walking" && pets.length) {
+      assertDogsOnly(pets);
+    }
+    const busy = await bookingsRepository.findBusySlotsBySitterId(sitterId);
+    return { ...quote, available: !hasConflict(busy, quote) };
+  },
+
+  async acceptMyBooking(sitterId, bookingId) {
+    return this.updateMyBookingStatus(sitterId, bookingId, "waiting_service");
+  },
+
+  async declineMyBooking(sitterId, bookingId) {
+    return this.updateMyBookingStatus(sitterId, bookingId, "cancelled");
+  },
+
+  async createCheckout(ownerId, bookingId) {
+    const booking = await bookingsRepository.findByIdAndOwnerId(ownerId, bookingId);
+    if (!booking) {
+      throw httpError(404, "Booking not found");
+    }
+    if (booking.payment_method !== "stripe") {
+      throw httpError(400, "Checkout is only for Stripe bookings");
+    }
+    if (booking.status === "cancelled") {
+      throw httpError(400, "Cannot pay a cancelled booking");
+    }
+    if (booking.payment_status === "paid") {
+      throw httpError(400, "Booking is already paid");
+    }
+
+    const session = await createCheckoutSession({
+      bookingId: booking.id,
+      amount: booking.total_price,
+    });
+    await bookingsRepository.updatePaymentTokenByBookingId(
+      booking.id,
+      session.payment_intent || session.id
+    );
+    return {
+      bookingId: booking.id,
+      checkoutUrl: session.url,
+      checkoutSessionId: session.id,
+    };
+  },
+
   async createBooking(owner, body) {
+    if (body?.serviceType) {
+      return this.createServiceBooking(owner, body);
+    }
+
     const {
       sitterId,
       petIds: rawPetIds,
@@ -387,9 +478,7 @@ export const bookingsService = {
       throw httpError(403, "This account has been banned");
     }
 
-    if (String(owner.id) === String(sitterId)) {
-      throw httpError(400, "You cannot book yourself");
-    }
+    assertNotSelfBooking(owner.id, sitterId);
 
     const petIds = normalizePetIds(rawPetIds);
     const { duration, durationUnit, totalPrice } = resolveBookingPricing({
@@ -472,8 +561,14 @@ export const bookingsService = {
       bookingId: created.bookingId,
     });
 
+    const conversation = await linkConversation(
+      owner.id,
+      sitterId,
+      created.bookingId
+    );
+
     if (paymentMethod === "cash") {
-      return created;
+      return { ...created, conversationId: conversationIdOf(conversation) };
     }
 
     const paymentIntent = await getStripe().paymentIntents.create({
@@ -491,7 +586,138 @@ export const bookingsService = {
 
     return {
       ...created,
+      conversationId: conversationIdOf(conversation),
       clientSecret: paymentIntent.client_secret,
+    };
+  },
+
+  async createServiceBooking(owner, body) {
+    const paymentMethod = body?.paymentMethod;
+    if (!PAYMENT_METHODS.has(paymentMethod)) {
+      throw httpError(400, "paymentMethod must be cash or stripe");
+    }
+
+    if (owner.is_banned) {
+      throw httpError(403, "This account has been banned");
+    }
+
+    const sitterId =
+      typeof body?.sitterId === "string" ? body.sitterId.trim() : "";
+    if (!sitterId) {
+      throw httpError(400, "sitterId is required");
+    }
+    assertNotSelfBooking(owner.id, sitterId);
+
+    if (!isOwnerProfileComplete(owner)) {
+      throw httpError(400, "Please complete your profile before booking");
+    }
+
+    const petIds = normalizePetIds(body?.petIds);
+    const quote = await this.quote(owner, body);
+    if (!quote.available) {
+      throw httpError(
+        409,
+        "This date and time is already booked. Please choose another slot."
+      );
+    }
+
+    const sitter = await sitterProfilesRepository.findPublicById(sitterId);
+    if (!sitter) {
+      throw httpError(404, "Sitter profile not found");
+    }
+
+    const pets = await petsRepository.findManyByIds(petIds, owner.id);
+    if (pets.length !== petIds.length) {
+      throw httpError(400, "One or more pets do not belong to you");
+    }
+    if (pets.some((pet) => pet.is_suspended)) {
+      throw httpError(400, "One or more pets are suspended and cannot be booked");
+    }
+    if (quote.serviceType === "dog_walking") {
+      assertDogsOnly(pets);
+    }
+
+    const acceptedTypes = new Set(
+      parsePetTypes(sitter.pet_types).map((name) =>
+        String(name).trim().toLowerCase()
+      )
+    );
+    const unsupported = pets.find(
+      (pet) => !acceptedTypes.has(String(pet.pet_type).trim().toLowerCase())
+    );
+    if (unsupported) {
+      throw httpError(400, "One or more pets are not accepted by this sitter");
+    }
+
+    const { ownerAddress, accessInstructions } = requireInHomeAddress(
+      body,
+      quote.serviceType
+    );
+
+    const additionalMessage =
+      typeof body?.message === "string" && body.message.trim()
+        ? body.message.trim()
+        : null;
+
+    const created = await bookingsRepository.createBookingWithPets({
+      ownerId: owner.id,
+      sitterId,
+      serviceId: quote.serviceId,
+      startDate: quote.startDate,
+      endDate: quote.endDate,
+      startTime: quote.startTime,
+      endTime: quote.endTime,
+      duration: quote.duration,
+      durationUnit: quote.durationUnit,
+      paymentMethod,
+      contactName: (owner.name && String(owner.name).trim()) || owner.email,
+      contactEmail: owner.email,
+      contactPhone: owner.phone,
+      additionalMessage,
+      ownerAddress,
+      accessInstructions,
+      totalPrice: quote.totalPrice,
+      petIds,
+    });
+
+    await notificationsService.notifyOwnerHiredSitter({
+      ownerId: owner.id,
+      sitterId,
+      bookingId: created.bookingId,
+    });
+
+    const conversation = await linkConversation(
+      owner.id,
+      sitterId,
+      created.bookingId
+    );
+
+    const payload = {
+      ...created,
+      conversationId: conversationIdOf(conversation),
+      serviceType: quote.serviceType,
+      mode: quote.mode,
+      hasCctv: quote.hasCctv,
+      totalPrice: quote.totalPrice,
+    };
+
+    if (paymentMethod === "cash") {
+      return payload;
+    }
+
+    const session = await createCheckoutSession({
+      bookingId: created.bookingId,
+      amount: quote.totalPrice,
+    });
+    await bookingsRepository.updatePaymentTokenByBookingId(
+      created.bookingId,
+      session.payment_intent || session.id
+    );
+
+    return {
+      ...payload,
+      checkoutUrl: session.url,
+      checkoutSessionId: session.id,
     };
   },
 };
