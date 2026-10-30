@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   cancelStripePaymentIntent,
   captureStripePaymentIntent,
+  checkoutUrls,
 } from "./stripeBookingPayment.mjs";
 
 describe("captureStripePaymentIntent", () => {
@@ -47,6 +48,20 @@ describe("captureStripePaymentIntent", () => {
       (err) => {
         assert.equal(err.statusCode, 402);
         return true;
+      }
+    );
+  });
+});
+
+describe("checkoutUrls", () => {
+  it("uses the first FRONTEND_URL origin", () => {
+    assert.deepEqual(
+      checkoutUrls("b1", "https://app.example.com,https://other.example.com"),
+      {
+        successUrl:
+          "https://app.example.com/owner/bookings?checkout=success&bookingId=b1",
+        cancelUrl:
+          "https://app.example.com/owner/bookings?checkout=cancel&bookingId=b1",
       }
     );
   });

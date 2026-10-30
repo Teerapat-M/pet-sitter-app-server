@@ -9,7 +9,7 @@ const PAYOUT_ELIGIBLE_WHERE = `
   AND (
     (
       bookings.payment_method = 'cash'
-      AND bookings.status IN ('in_service', 'success')
+      AND bookings.status IN ('in_service', 'success', 'completed')
     )
     OR (
       bookings.payment_method = 'stripe'

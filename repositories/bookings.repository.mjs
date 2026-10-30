@@ -1,4 +1,60 @@
 import connectionPool from "../utils/db.mjs";
+import { httpError } from "../utils/httpError.mjs";
+import { ACTIVE_BOOKING_STATUSES } from "../utils/bookingStatus.mjs";
+import { lockSitterSlot } from "../utils/sitterLock.mjs";
+
+/** Keep Pool/Client `this` — do not destructure `{ query } = pool`. */
+function bindQuery(client) {
+  return (...args) => client.query(...args);
+}
+
+const SERVICE_SELECT = `
+  bookings.service_id,
+  services.type AS service_type,
+  services.mode AS service_mode,
+  services.duration_minutes AS service_duration_minutes,
+  services.price_amount AS service_unit_price,
+  bookings.owner_address,
+  bookings.access_instructions,
+  EXISTS (
+    SELECT 1 FROM cameras
+    WHERE cameras.sitter_id = bookings.sitter_id
+      AND cameras.is_enabled = true
+  ) AS has_cctv
+`;
+
+const SERVICE_JOIN = `
+  LEFT JOIN services ON services.id = bookings.service_id
+`;
+
+const OVERLAP_SQL = `
+  SELECT id
+  FROM bookings
+  WHERE sitter_id = $1
+    AND status IN ('waiting_confirm', 'waiting_service', 'in_service')
+    AND ($6::text IS NULL OR id::text <> $6::text)
+    AND (
+      (
+        COALESCE(end_date, start_date) > start_date
+        AND start_date < $3::date
+        AND COALESCE(end_date, start_date) > $2::date
+      )
+      OR (
+        $3::date > $2::date
+        AND start_date = COALESCE(end_date, start_date)
+        AND start_date >= $2::date
+        AND start_date < $3::date
+      )
+      OR (
+        start_date = COALESCE(end_date, start_date)
+        AND $2::date = $3::date
+        AND start_date = $2::date
+        AND (start_date + start_time) < ($3::date + $5::time)
+        AND (start_date + end_time) > ($2::date + $4::time)
+      )
+    )
+  LIMIT 1
+`;
 
 export const bookingsRepository = {
   async findManyBySitterId(sitterId, search, status, limit, offset) {
@@ -13,7 +69,10 @@ export const bookingsRepository = {
         bookings.end_date,
         bookings.start_time,
         bookings.end_time,
-        bookings.status
+        bookings.status,
+        bookings.service_id,
+        (SELECT services.type FROM services WHERE services.id = bookings.service_id) AS service_type,
+        (SELECT services.mode FROM services WHERE services.id = bookings.service_id) AS service_mode
       FROM bookings
       INNER JOIN users ON users.id = bookings.owner_id
       LEFT JOIN booking_pets ON booking_pets.booking_id = bookings.id
@@ -142,6 +201,7 @@ export const bookingsRepository = {
         payments.paid_at AS transaction_date,
         bookings.additional_message,
         bookings.status,
+        ${SERVICE_SELECT},
         COALESCE(
           (
             SELECT json_agg(
@@ -169,6 +229,7 @@ export const bookingsRepository = {
       FROM bookings
       INNER JOIN users ON users.id = bookings.owner_id
       LEFT JOIN payments ON payments.booking_id = bookings.id
+      ${SERVICE_JOIN}
       WHERE bookings.id = $1
         AND bookings.sitter_id = $2
       `,
@@ -214,6 +275,9 @@ export const bookingsRepository = {
         bookings.status,
         bookings.created_at,
         bookings.updated_at,
+        bookings.service_id,
+        (SELECT services.type FROM services WHERE services.id = bookings.service_id) AS service_type,
+        (SELECT services.mode FROM services WHERE services.id = bookings.service_id) AS service_mode,
         (
           SELECT json_build_object(
             'rating', reviews.rating,
@@ -279,6 +343,7 @@ export const bookingsRepository = {
         bookings.status,
         bookings.created_at,
         bookings.updated_at,
+        ${SERVICE_SELECT},
         COALESCE(
           (
             SELECT json_agg(
@@ -316,6 +381,7 @@ export const bookingsRepository = {
       INNER JOIN users AS sitter_users ON sitter_users.id = bookings.sitter_id
       LEFT JOIN sitter_profiles ON sitter_profiles.user_id = bookings.sitter_id
       LEFT JOIN payments ON payments.booking_id = bookings.id
+      ${SERVICE_JOIN}
       WHERE bookings.id = $1
         AND bookings.owner_id = $2
       `,
@@ -376,45 +442,75 @@ export const bookingsRepository = {
     return rows[0] ?? null;
   },
 
-  // ใช้โดย rescheduleOwnerBooking — อัปเดตวัน/เวลา/ระยะเวลา/ราคาของ booking เดิม
-  // (ราคาถูกคำนวณใหม่โดย service ก่อนเรียกมาที่นี่แล้ว)
+  // ใช้โดย rescheduleOwnerBooking — lock sitter slot, reject overlap, then update
   async updateScheduleByIdAndOwnerId(
     ownerId,
     bookingId,
+    sitterId,
     { startDate, endDate, startTime, endTime, duration, durationUnit, totalPrice }
   ) {
-    const { rows } = await connectionPool.query(
-      `
-      UPDATE bookings
-      SET start_date = $3::date,
-          end_date = $4::date,
-          start_time = $5::time,
-          end_time = $6::time,
-          duration = $7,
-          duration_unit = $8,
-          total_price = $9,
-          updated_at = NOW()
-      WHERE id = $1
-        AND owner_id = $2
-      RETURNING id, start_date, end_date, start_time, end_time, duration, duration_unit, total_price, status
-      `,
-      [
-        bookingId,
-        ownerId,
+    const client = await connectionPool.connect();
+    const query = bindQuery(client);
+
+    try {
+      await query("BEGIN");
+      await lockSitterSlot(query, sitterId);
+
+      const { rows: overlapRows } = await query(OVERLAP_SQL, [
+        sitterId,
         startDate,
         endDate,
         startTime,
         endTime,
-        duration,
-        durationUnit,
-        totalPrice,
-      ]
-    );
+        bookingId,
+      ]);
+      if (overlapRows[0]) {
+        throw httpError(
+          409,
+          "This date and time is already booked. Please choose another slot."
+        );
+      }
 
-    return rows[0] ?? null;
+      const { rows } = await query(
+        `
+        UPDATE bookings
+        SET start_date = $3::date,
+            end_date = $4::date,
+            start_time = $5::time,
+            end_time = $6::time,
+            duration = $7,
+            duration_unit = $8,
+            total_price = $9,
+            updated_at = NOW()
+        WHERE id = $1
+          AND owner_id = $2
+        RETURNING id, start_date, end_date, start_time, end_time, duration, duration_unit, total_price, status
+        `,
+        [
+          bookingId,
+          ownerId,
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+          duration,
+          durationUnit,
+          totalPrice,
+        ]
+      );
+
+      await query("COMMIT");
+      return rows[0] ?? null;
+    } catch (error) {
+      await query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 
-  // owner booking — สร้าง booking + pets + payment ใน transaction เดียว
+  // owner booking — lock sitter row set, reject overlap, then insert
+  // booking + pets + payment in one transaction.
   async createBookingWithPets({
     ownerId,
     sitterId,
@@ -431,18 +527,47 @@ export const bookingsRepository = {
     additionalMessage,
     totalPrice,
     petIds,
+    serviceId = null,
+    ownerAddress = null,
+    accessInstructions = null,
   }) {
     const client = await connectionPool.connect();
+    const query = bindQuery(client);
 
     try {
-      await client.query("BEGIN");
+      await query("BEGIN");
+      await lockSitterSlot(query, sitterId);
 
-      // T01 — payment_method จาก client + transaction_no จาก DB sequence
-      const { rows: bookingRows } = await client.query(
+      await query(
+        `SELECT id
+         FROM bookings
+         WHERE sitter_id = $1
+           AND status = ANY($2::varchar[])
+         FOR UPDATE`,
+        [sitterId, ACTIVE_BOOKING_STATUSES]
+      );
+
+      const { rows: overlapRows } = await query(OVERLAP_SQL, [
+        sitterId,
+        startDate,
+        endDate,
+        startTime,
+        endTime,
+        null,
+      ]);
+      if (overlapRows[0]) {
+        throw httpError(
+          409,
+          "This date and time is already booked. Please choose another slot."
+        );
+      }
+
+      const { rows: bookingRows } = await query(
         `
         INSERT INTO bookings (
           owner_id,
           sitter_id,
+          service_id,
           start_date,
           end_date,
           start_time,
@@ -455,19 +580,22 @@ export const bookingsRepository = {
           contact_email,
           contact_phone,
           additional_message,
+          owner_address,
+          access_instructions,
           total_price,
           status
         )
         VALUES (
-          $1, $2, $3::date, $4::date, $5::time, $6::time, $7, $8,
-          $9, next_transaction_no(),
-          $10, $11, $12, $13, $14, 'waiting_confirm'
+          $1, $2, $3, $4::date, $5::date, $6::time, $7::time, $8, $9,
+          $10, next_transaction_no(),
+          $11, $12, $13, $14, $15, $16, $17, 'waiting_confirm'
         )
-        RETURNING id, status, total_price, transaction_no
+        RETURNING id, status, total_price, transaction_no, service_id
         `,
         [
           ownerId,
           sitterId,
+          serviceId,
           startDate,
           endDate,
           startTime,
@@ -479,6 +607,8 @@ export const bookingsRepository = {
           contactEmail,
           contactPhone,
           additionalMessage,
+          ownerAddress,
+          accessInstructions,
           totalPrice,
         ]
       );
@@ -486,7 +616,7 @@ export const bookingsRepository = {
       const booking = bookingRows[0];
 
       for (const petId of petIds) {
-        await client.query(
+        await query(
           `
           INSERT INTO booking_pets (booking_id, pet_id)
           VALUES ($1, $2)
@@ -495,7 +625,7 @@ export const bookingsRepository = {
         );
       }
 
-      const { rows: paymentRows } = await client.query(
+      const { rows: paymentRows } = await query(
         `
         INSERT INTO payments (booking_id, amount, status)
         VALUES ($1, $2, 'pending')
@@ -504,7 +634,7 @@ export const bookingsRepository = {
         [booking.id, totalPrice]
       );
 
-      await client.query("COMMIT");
+      await query("COMMIT");
 
       return {
         bookingId: booking.id,
@@ -512,9 +642,10 @@ export const bookingsRepository = {
         totalPrice: Number(booking.total_price),
         transactionNo: booking.transaction_no,
         paymentStatus: paymentRows[0].status,
+        serviceId: booking.service_id ?? null,
       };
     } catch (error) {
-      await client.query("ROLLBACK");
+      await query("ROLLBACK");
       throw error;
     } finally {
       client.release();
@@ -570,39 +701,81 @@ export const bookingsRepository = {
     endTime,
     excludeBookingId = null,
   }) {
-    const { rows } = await connectionPool.query(
-      `
-      SELECT id
-      FROM bookings
-      WHERE sitter_id = $1
-        AND status IN ('waiting_confirm', 'waiting_service', 'in_service')
-        AND ($6::text IS NULL OR id::text <> $6::text)
-        AND (
-          (
-            COALESCE(end_date, start_date) > start_date
-            AND start_date < $3::date
-            AND COALESCE(end_date, start_date) > $2::date
-          )
-          OR (
-            $3::date > $2::date
-            AND start_date = COALESCE(end_date, start_date)
-            AND start_date >= $2::date
-            AND start_date < $3::date
-          )
-          OR (
-            start_date = COALESCE(end_date, start_date)
-            AND $2::date = $3::date
-            AND start_date = $2::date
-            AND (start_date + start_time) < ($3::date + $5::time)
-            AND (start_date + end_time) > ($2::date + $4::time)
-          )
-        )
-      LIMIT 1
-      `,
-      [sitterId, startDate, endDate, startTime, endTime, excludeBookingId]
-    );
+    const { rows } = await connectionPool.query(OVERLAP_SQL, [
+      sitterId,
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+      excludeBookingId,
+    ]);
 
     return Boolean(rows[0]);
+  },
+
+  async findById(bookingId) {
+    const { rows } = await connectionPool.query(
+      `
+      SELECT
+        bookings.id,
+        bookings.owner_id,
+        bookings.sitter_id,
+        bookings.status,
+        bookings.payment_method,
+        bookings.total_price,
+        bookings.transaction_no,
+        payments.status AS payment_status,
+        payments.payment_token
+      FROM bookings
+      LEFT JOIN payments ON payments.booking_id = bookings.id
+      WHERE bookings.id = $1
+      LIMIT 1
+      `,
+      [bookingId]
+    );
+    return rows[0] ?? null;
+  },
+
+  async markPaymentPaidByTokenOrBooking({
+    paymentToken,
+    bookingId,
+    status = "paid",
+    paidAt = null,
+  }) {
+    if (paymentToken) {
+      const byToken = await this.updatePaymentStatusByToken(
+        paymentToken,
+        status,
+        paidAt
+      );
+      if (byToken) return byToken;
+    }
+    if (!bookingId) return null;
+    if (paymentToken) {
+      await connectionPool.query(
+        `
+        UPDATE payments
+        SET payment_token = COALESCE(payment_token, $2)
+        WHERE booking_id = $1
+        `,
+        [bookingId, paymentToken]
+      );
+    }
+    const { rows } = await connectionPool.query(
+      `
+      UPDATE payments
+      SET status = $2::varchar,
+          paid_at = CASE
+            WHEN $2::text = 'paid' THEN COALESCE($3::timestamptz, NOW())
+            ELSE paid_at
+          END,
+          payment_token = COALESCE($4::text, payment_token)
+      WHERE booking_id = $1
+      RETURNING booking_id, status, paid_at
+      `,
+      [bookingId, status, paidAt, paymentToken ?? null]
+    );
+    return rows[0] ?? null;
   },
 
   async updatePaymentStatusByToken(paymentToken, status, paidAt = null) {

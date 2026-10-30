@@ -1,3 +1,5 @@
+import { isValidEmail } from "../utils/authValidation.mjs";
+
 const MIN_OWNER_AGE = 18;
 
 function toIsoDate(value) {
@@ -18,7 +20,7 @@ export function isOwnerProfileComplete(owner) {
   const dateOfBirth = toIsoDate(owner?.date_of_birth);
 
   if (!name || name.length < 6 || name.length > 20) return false;
-  if (!/^[^\s@]+@[^\s@]+\.com$/i.test(email)) return false;
+  if (!isValidEmail(email)) return false;
   if (!/^0\d{9}$/.test(phone)) return false;
   if (!/^\d{13}$/.test(idNumber)) return false;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) return false;
@@ -46,7 +48,7 @@ export const validateUpdateOwners = (req, res, next) => {
 
     if (!email?.trim()) {
       return res.status(400).json({ message: "Email is required" });
-    } else if (!/^[^\s@]+@[^\s@]+\.com$/i.test(email.trim())) {
+    } else if (!isValidEmail(email)) {
         return res.status(400).json({ message: "Invalid email address" });
     }
 

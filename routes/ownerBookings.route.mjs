@@ -76,9 +76,9 @@ ownerBookingsRouter.post(
 
 /**
  * @openapi
- * /api/bookings:
+ * /api/bookings/quote:
  *   post:
- *     summary: Create a booking (cash or stripe)
+ *     summary: Server-side price quote (client totalPrice is ignored)
  *     tags: [Bookings]
  *     security:
  *       - bearerAuth: []
@@ -87,34 +87,68 @@ ownerBookingsRouter.post(
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required: [sitterId, petIds, paymentMethod]
- *             properties:
- *               sitterId:
- *                 type: string
- *                 format: uuid
- *               petIds:
- *                 type: array
- *                 items:
- *                   type: integer
- *               message:
- *                 type: string
- *               paymentMethod:
- *                 type: string
- *                 enum: [cash, stripe]
- *               startDate:
- *                 type: string
- *                 example: "2026-09-10"
- *               endDate:
- *                 type: string
- *               startTime:
- *                 type: string
- *                 example: "10:00"
- *               endTime:
- *                 type: string
+ *             $ref: '#/components/schemas/BookingQuoteRequest'
+ *     responses:
+ *       200:
+ *         description: Quote with unit price, quantity, totalPrice, available, hasCctv
+ *       400:
+ *         description: Validation error
+ *       404:
+ *         description: Sitter or offering not found
+ */
+ownerBookingsRouter.post("/quote", requireAuth, bookingsController.quote);
+
+/**
+ * @openapi
+ * /api/bookings/{id}/checkout:
+ *   post:
+ *     summary: Create a Stripe TEST Checkout Session for an unpaid booking
+ *     tags: [Bookings]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: checkoutUrl + checkoutSessionId
+ *       400:
+ *         description: Not a payable Stripe booking
+ *       404:
+ *         description: Booking not found
+ */
+ownerBookingsRouter.post(
+  "/:id/checkout",
+  requireAuth,
+  bookingsController.checkout
+);
+
+/**
+ * @openapi
+ * /api/bookings:
+ *   post:
+ *     summary: Create a booking (cash or stripe). Phase 3 sends serviceType.
+ *     description: |
+ *       Server recomputes price from `services`. `totalPrice` in the body is ignored.
+ *       Stripe service bookings return `checkoutUrl`. Legacy (no serviceType) still
+ *       returns PaymentIntent `clientSecret`. On create, a conversation is linked
+ *       (`conversation.booking_id`) after owner/sitter pair validation.
+ *     tags: [Bookings]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateBookingRequest'
  *     responses:
  *       201:
- *         description: Booking created
+ *         description: Booking created (waiting_confirm)
  *       400:
  *         description: Validation error
  *       401:
