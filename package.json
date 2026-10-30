@@ -19,6 +19,9 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "bugs": {
     "url": "https://github.com/Kaopan11/pet-sitter-app-server/issues"
   },

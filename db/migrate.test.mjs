@@ -9,6 +9,7 @@ describe("listMigrationFiles", () => {
       "001_init.sql",
       "002_services_cameras_walks.sql",
       "003_onboarding_seen_at.sql",
+      "004_clip_camera_grants_on_reschedule.sql",
     ]);
   });
 });

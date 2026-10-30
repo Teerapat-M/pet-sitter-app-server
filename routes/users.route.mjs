@@ -49,6 +49,46 @@ usersRouter.get("/", usersController.getAllUsers);
  *         description: Unauthorized
  */
 usersRouter.get("/me", requireAuth, usersController.getMe);
+/**
+ * @openapi
+ * /api/users/me/onboarding:
+ *   patch:
+ *     summary: Mark the first-visit tour seen, or clear it to replay
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               seen:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Updated user including onboarding_seen_at
+ *       400:
+ *         description: seen must be true or false
+ *       401:
+ *         description: Unauthorized
+ *   put:
+ *     summary: Mark the first-visit tour seen, or clear it to replay
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ */
+usersRouter.patch(
+  "/me/onboarding",
+  requireAuth,
+  usersController.setOnboardingSeen
+);
+usersRouter.put(
+  "/me/onboarding",
+  requireAuth,
+  usersController.setOnboardingSeen
+);
 // booking Day 0 — สัตว์ของ owner ที่ login
 usersRouter.get("/me/pets", requireAuth, usersController.getMyPets);
 usersRouter.put(

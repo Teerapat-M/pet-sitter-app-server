@@ -2,9 +2,9 @@
 
 > REST API for the **Sitter\*** pet-sitting marketplace — owners, sitters, admin, bookings, chat, payments, and payouts.
 
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)]()
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-green.svg)]()
 [![Express](https://img.shields.io/badge/Express-5.x-blue.svg)]()
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-336791.svg)]()
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-336791.svg)]()
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)]()
 
 **Live API:** https://pet-sitter-app-server.onrender.com  
@@ -68,9 +68,9 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 
 | Layer | Technology |
 |--------|------------|
-| **Runtime** | Node.js (ES modules) |
+| **Runtime** | Node.js 22+ (ES modules) |
 | **Framework** | Express 5 |
-| **Database** | PostgreSQL (`pg`) on Supabase |
+| **Database** | PostgreSQL 15+ (`pg`) on Supabase |
 | **Auth** | Supabase Auth + JWT (JWKS) |
 | **Payments** | Stripe (webhooks, manual capture) |
 | **File upload** | multer → Supabase Storage (`photos` bucket) |
@@ -113,7 +113,8 @@ pet-sitter-app-server/
 │   └── migrations/
 │       ├── 001_init.sql
 │       ├── 002_services_cameras_walks.sql
-│       └── 003_onboarding_seen_at.sql
+│       ├── 003_onboarding_seen_at.sql
+│       └── 004_clip_camera_grants_on_reschedule.sql
 ├── package.json
 ├── routes/                 # HTTP route definitions
 │   ├── auth.route.mjs
@@ -143,8 +144,9 @@ pet-sitter-app-server/
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - npm
+- PostgreSQL 15+ (Supabase Postgres, or local)
 - Supabase project (Postgres + Auth)
 - Stripe account (for card payments)
 
@@ -169,6 +171,8 @@ npm run db:seed      # demo owners, sitters, pets, bookings, cameras, walks
 
 Both commands read `DATABASE_URL`. Use the **direct** Postgres URI (port 5432), not the pooler, for DDL. Do not point these scripts at production unless you intend to.
 
+Migrations use `NULLS NOT DISTINCT` unique indexes and `EXECUTE FUNCTION` triggers, so **PostgreSQL 15 or later** is required (Supabase current Postgres and the CI service image both qualify).
+
 ### Run locally
 
 ```bash
@@ -192,7 +196,7 @@ curl http://localhost:4000/health
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | Supabase Postgres connection string |
+| `DATABASE_URL` | Yes | Postgres URI. SSL is off for `localhost` / `127.0.0.1` or `sslmode=disable`; otherwise `{ rejectUnauthorized: false }` |
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only; Auth admin & storage (**never expose to FE**) |
 | `SUPABASE_JWKS_URL` | Yes | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
@@ -291,6 +295,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 |--------|------|------|-------------|
 | GET | `/` | — | List users |
 | GET | `/me` | Bearer | Current user |
+| PATCH / PUT | `/me/onboarding` | Bearer | Set `onboarding_seen_at` (`{ seen: true }` or `{ seen: false }` to replay) |
 | GET | `/me/pets` | Bearer | My pets (shortcut) |
 | PUT | `/me` | Bearer | Update profile (+ avatar multipart) |
 

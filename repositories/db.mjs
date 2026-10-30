@@ -1,11 +1,13 @@
 import pg from "pg";
 import "dotenv/config";
+import { sslForDatabaseUrl } from "../utils/pgSsl.mjs";
 
 const { Pool } = pg;
 
-// เชื่อม PostgreSQL โดยตรง (Direct connection จาก Supabase)
+const connectionString = process.env.DATABASE_URL;
+
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  connectionString,
+  ssl: sslForDatabaseUrl(connectionString),
   connectionTimeoutMillis: 8000,
 });

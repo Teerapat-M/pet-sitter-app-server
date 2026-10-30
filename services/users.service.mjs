@@ -1,6 +1,7 @@
 import { usersRepository } from "../repositories/users.repository.mjs";
 import { petsRepository } from "../repositories/pets.repository.mjs";
 import { httpError } from "../utils/httpError.mjs";
+import { parseOnboardingSeen } from "../utils/onboarding.mjs";
 import supabase from "../repositories/supabase.mjs";
 
 const PHOTOS_BUCKET = "photos";
@@ -58,6 +59,16 @@ export const usersService = {
       date_of_birth: body.date_of_birth || null,
       avatar_url: avatarUrl,
     });
+    if (!updated) throw httpError(404, "User not found");
+    return updated;
+  },
+
+  async setOnboardingSeen(userId, body) {
+    const seen = parseOnboardingSeen(body);
+    const updated = await usersRepository.setOnboardingSeenAt(
+      userId,
+      seen ? new Date() : null
+    );
     if (!updated) throw httpError(404, "User not found");
     return updated;
   },

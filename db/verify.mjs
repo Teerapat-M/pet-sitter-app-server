@@ -27,6 +27,66 @@ const TABLES = [
   "schema_migrations",
 ];
 
+const BOARDING_BOOKING_ID = "b0000001-0001-4001-8001-000000000001";
+
+async function assertCameraGrantsClipAndRevoke(client) {
+  await client.query("BEGIN");
+  try {
+    const { rows: grantRows } = await client.query(
+      `SELECT booking_id, camera_id, valid_from, valid_to
+       FROM public.camera_access_grants
+       WHERE booking_id = $1
+       LIMIT 1
+       FOR UPDATE`,
+      [BOARDING_BOOKING_ID]
+    );
+    const grant = grantRows[0];
+    if (!grant) {
+      throw new Error("seed did not insert camera_access_grants");
+    }
+
+    await client.query(
+      `UPDATE public.bookings
+       SET end_date = end_date - 1,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [grant.booking_id]
+    );
+
+    const { rows: clipped } = await client.query(
+      `SELECT valid_from, valid_to
+       FROM public.camera_access_grants
+       WHERE booking_id = $1 AND camera_id = $2`,
+      [grant.booking_id, grant.camera_id]
+    );
+    if (!clipped[0]) {
+      throw new Error("expected grant to clip, not vanish, on a one-day shrink");
+    }
+    if (clipped[0].valid_to.getTime() >= grant.valid_to.getTime()) {
+      throw new Error("camera grant valid_to was not clipped after reschedule");
+    }
+
+    await client.query(
+      `UPDATE public.bookings
+       SET start_date = end_date,
+           start_time = end_time,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [grant.booking_id]
+    );
+
+    const { rows: revoked } = await client.query(
+      `SELECT 1 FROM public.camera_access_grants WHERE booking_id = $1`,
+      [grant.booking_id]
+    );
+    if (revoked.length) {
+      throw new Error("camera grants were not revoked when the window collapsed");
+    }
+  } finally {
+    await client.query("ROLLBACK");
+  }
+}
+
 const client = new Client(poolConfig());
 await client.connect();
 try {
@@ -60,6 +120,8 @@ try {
   if (!colRows[0]) {
     throw new Error("users.onboarding_seen_at is missing");
   }
+
+  await assertCameraGrantsClipAndRevoke(client);
 
   console.log(`ok: ${TABLES.length} tables, ${walkRows[0].n} walk_points`);
 } finally {
