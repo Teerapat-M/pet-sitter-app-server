@@ -9,7 +9,22 @@
 
 **Live API:** https://pet-sitter-app-server.onrender.com  
 **Frontend:** https://github.com/Kaopan11/pet-sitter-app-client  
+**Client (this upgrade):** https://github.com/Teerapat-M/pet-sitter-app-client  
 **Health check:** `GET /health`
+
+---
+
+## Pet Sitter Plus roadmap
+
+Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets in the repo.
+
+| Phase | What |
+|-------|------|
+| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, and `users.onboarding_seen_at` in `003`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
+| **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. First-visit onboarding: skippable welcome modal plus a 3–4 step walkthrough of services, booking, CCTV and GPS (frames D18/M18 from Penpot). Seen flag in `localStorage` and `users.onboarding_seen_at`; replay from the menu. |
+| **3 — Services and booking** | Boarding, dog walking, and in-home sitter (visit or overnight). New booking flows, prices from `services`, CCTV / walk actions on booking detail. |
+| **4 — Live GPS walks** | Walker posts points every 5–10s. Owner subscribes to the trail. Summary (distance, duration, polyline) is stored on the walk when it ends. |
+| **5 — CCTV** | Free WebRTC: sitter browser camera, Supabase Realtime signalling, short-lived signed access, `camera:status` event. Grants are limited to the booking window. |
 
 ---
 
@@ -91,6 +106,14 @@
 ```text
 pet-sitter-app-server/
 ├── app.mjs                 # Entry point, CORS, routes, error handler
+├── db/
+│   ├── migrate.mjs         # npm run db:migrate
+│   ├── seed.mjs            # npm run db:seed
+│   ├── seed.sql
+│   └── migrations/
+│       ├── 001_init.sql
+│       ├── 002_services_cameras_walks.sql
+│       └── 003_onboarding_seen_at.sql
 ├── package.json
 ├── routes/                 # HTTP route definitions
 │   ├── auth.route.mjs
@@ -136,6 +159,15 @@ npm install
 ### Environment
 
 Copy `.env.example` to `.env` and fill in your values (see [Environment Variables](#-environment-variables)). **Do not commit `.env`.**
+
+### Database (fresh Supabase or local Postgres)
+
+```bash
+npm run db:migrate   # apply db/migrations/*.sql, tracked in schema_migrations
+npm run db:seed      # demo owners, sitters, pets, bookings, cameras, walks
+```
+
+Both commands read `DATABASE_URL`. Use the **direct** Postgres URI (port 5432), not the pooler, for DDL. Do not point these scripts at production unless you intend to.
 
 ### Run locally
 
@@ -419,7 +451,9 @@ npm run dev
 npm test
 ```
 
-Runs unit/integration tests under `utils/**/*.test.mjs` and `services/**/*.test.mjs` (auth, OAuth, payout, bookings, Stripe helpers, etc.).
+Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, Stripe helpers, migration file order).
+
+CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db:seed`, and `db:verify`. That check does not use a live Supabase project.
 
 ---
 

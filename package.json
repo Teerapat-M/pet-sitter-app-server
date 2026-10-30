@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node app.mjs",
     "dev": "nodemon app.mjs",
-    "test": "node --test utils/**/*.test.mjs services/**/*.test.mjs"
+    "test": "node --test",
+    "db:migrate": "node db/migrate.mjs",
+    "db:seed": "node db/seed.mjs",
+    "db:verify": "node db/verify.mjs"
   },
   "repository": {
     "type": "git",
