@@ -2,7 +2,8 @@ import { conversationsRepository } from "../repositories/conversations.repositor
 import { messagesRepository } from "../repositories/messages.repository.mjs";
 import { sitterProfilesRepository } from "../repositories/sitterProfiles.repository.mjs";
 import { usersRepository } from "../repositories/users.repository.mjs";
-import { publishChatEvent } from "./chatEvents.mjs";
+import { isChatConnected, publishChatEvent } from "./chatEvents.mjs";
+import { toConversationThread } from "./conversationThread.mjs";
 import { httpError } from "../utils/httpError.mjs";
 import supabase from "../repositories/supabase.mjs";
 
@@ -55,30 +56,6 @@ async function uploadChatImage(file, userId) {
   } = supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(data.path);
 
   return publicUrl;
-}
-
-function previewText(row) {
-  const content = String(row.last_message ?? "").trim();
-  if (content) return content;
-  if (row.last_image_url) return "Sent a photo";
-  return "";
-}
-
-function toConversation(row) {
-  return {
-    id: String(row.id),
-    ownerId: row.owner_id,
-    sitterId: row.sitter_id,
-    createdAt: row.created_at,
-    otherUser: {
-      id: row.other_user_id,
-      name: row.other_name || "User",
-      avatarUrl: row.other_avatar_url ?? null,
-    },
-    lastMessage: previewText(row),
-    lastSentAt: row.last_sent_at ?? null,
-    unreadCount: row.unread_count ?? 0,
-  };
 }
 
 export function toMessage(row) {
@@ -164,7 +141,11 @@ export const chatService = {
 
   async listConversations(userId) {
     const rows = await conversationsRepository.listForUser(userId);
-    return rows.map(toConversation);
+    return rows.map((row) =>
+      toConversationThread(row, {
+        sseConnected: isChatConnected(row.other_user_id),
+      })
+    );
   },
 
   async listMessages(userId, conversationId) {

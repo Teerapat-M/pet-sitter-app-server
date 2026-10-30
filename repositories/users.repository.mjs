@@ -86,6 +86,15 @@ export const usersRepository = {
     return rows[0] ?? null;
   },
 
+  async touchLastSeenAt(id) {
+    await pool.query(
+      `UPDATE public.users
+       SET last_seen_at = NOW()
+       WHERE id = $1`,
+      [id]
+    );
+  },
+
   async setBanned(id, isBanned) {
     const { rows } = await pool.query(
       `UPDATE public.users

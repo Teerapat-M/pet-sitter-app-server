@@ -121,6 +121,28 @@ try {
     throw new Error("users.onboarding_seen_at is missing");
   }
 
+  const { rows: presenceCols } = await client.query(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'users'
+           AND column_name = 'last_seen_at'
+       ) AS has_last_seen,
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'conversations'
+           AND column_name = 'booking_id'
+       ) AS has_booking_id`
+  );
+  if (!presenceCols[0]?.has_last_seen) {
+    throw new Error("users.last_seen_at is missing");
+  }
+  if (!presenceCols[0]?.has_booking_id) {
+    throw new Error("conversations.booking_id is missing");
+  }
+
   await assertCameraGrantsClipAndRevoke(client);
 
   console.log(`ok: ${TABLES.length} tables, ${walkRows[0].n} walk_points`);

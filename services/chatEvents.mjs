@@ -1,5 +1,7 @@
 import { pool } from "../repositories/db.mjs";
 import { messagesRepository } from "../repositories/messages.repository.mjs";
+import { usersRepository } from "../repositories/users.repository.mjs";
+import { scheduleLastSeenTouch } from "../utils/presence.mjs";
 import { toMessage } from "./chat.service.mjs";
 
 const CHANNEL = "chat_events";
@@ -15,6 +17,11 @@ function clientKey(userId) {
 function sendEvent(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
   if (typeof res.flush === "function") res.flush();
+}
+
+export function isChatConnected(userId) {
+  const set = clients.get(clientKey(userId));
+  return Boolean(set && set.size > 0);
 }
 
 function removeClient(userId, res) {
@@ -207,6 +214,7 @@ export function subscribeChatEvents(userId, req, res) {
     clients.set(key, set);
   }
   set.add(res);
+  scheduleLastSeenTouch(userId, (id) => usersRepository.touchLastSeenAt(id));
 
   sendEvent(res, { type: "connected" });
 

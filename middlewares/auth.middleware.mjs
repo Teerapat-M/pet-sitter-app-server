@@ -5,6 +5,7 @@ import {
   AccessTokenError,
   verifyAccessToken,
 } from "../utils/verifyAccessToken.mjs";
+import { scheduleLastSeenTouch } from "../utils/presence.mjs";
 
 function isLegacyHs256(token) {
   try {
@@ -66,6 +67,9 @@ export const requireAuth = async (req, res, next) => {
 
     req.authUser = authUser;
     req.user = profile;
+    scheduleLastSeenTouch(profile.id, (id) =>
+      usersRepository.touchLastSeenAt(id)
+    );
     next();
   } catch (error) {
     next(error);

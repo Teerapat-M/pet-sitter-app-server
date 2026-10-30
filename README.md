@@ -20,7 +20,7 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 
 | Phase | What |
 |-------|------|
-| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, and `users.onboarding_seen_at` in `003`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
+| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, and `users.last_seen_at` + `conversations.booking_id` in `005`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
 | **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. First-visit onboarding: skippable welcome modal plus a 3–4 step walkthrough of services, booking, CCTV and GPS (frames D18/M18 from Penpot). Seen flag in `localStorage` and `users.onboarding_seen_at`; replay from the menu. |
 | **3 — Services and booking** | Boarding, dog walking, and in-home sitter (visit or overnight). New booking flows, prices from `services`, CCTV / walk actions on booking detail. |
 | **4 — Live GPS walks** | Walker posts points every 5–10s. Owner subscribes to the trail. Summary (distance, duration, polyline) is stored on the walk when it ends. |
@@ -114,7 +114,8 @@ pet-sitter-app-server/
 │       ├── 001_init.sql
 │       ├── 002_services_cameras_walks.sql
 │       ├── 003_onboarding_seen_at.sql
-│       └── 004_clip_camera_grants_on_reschedule.sql
+│       ├── 004_clip_camera_grants_on_reschedule.sql
+│       └── 005_conversation_booking_and_presence.sql
 ├── package.json
 ├── routes/                 # HTTP route definitions
 │   ├── auth.route.mjs
@@ -362,7 +363,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/` | Bearer | Create/find conversation |
-| GET | `/` | Bearer | List conversations |
+| GET | `/` | Bearer | List conversations: `bookingId` + booking summary `{ id, service_name, dates, pets, status, transactionNo }` (null if unlinked); `otherUser.lastSeenAt` / `isOnline`; `otherUser.phone` only for confirmed/in-service bookings |
 | GET | `/events` | Bearer | SSE realtime stream |
 | GET | `/:id/messages` | Bearer | Message history |
 | POST | `/:id/messages` | Bearer | Send message (+ image) |
