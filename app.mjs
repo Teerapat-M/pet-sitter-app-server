@@ -14,6 +14,7 @@ import reportsRouter from "./routes/reports.rout.mjs";
 import notificationsRouter from "./routes/notifications.route.mjs";
 import petTypesRouter from "./routes/petTypes.route.mjs";
 import { startChatListener } from "./services/chatEvents.mjs";
+import { startWalkListener } from "./services/walkEvents.mjs";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./swagger.mjs";
 import { corsOptions } from "./utils/corsOrigins.mjs";
@@ -79,5 +80,8 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`);
   startChatListener().catch((error) => {
     console.error("Chat realtime listener failed:", error.message);
+  });
+  startWalkListener().catch((error) => {
+    console.error("Walk realtime listener failed:", error.message);
   });
 });

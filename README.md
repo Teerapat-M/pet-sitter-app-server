@@ -20,10 +20,10 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 
 | Phase | What |
 |-------|------|
-| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, and `users.last_seen_at` + `conversations.booking_id` in `005`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
+| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, `users.last_seen_at` + `conversations.booking_id` in `005`, booking Phase 3 columns in `006`, and walk unique-index + `NOTIFY` in `007`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
 | **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. First-visit onboarding: skippable welcome modal plus a 3–4 step walkthrough of services, booking, CCTV and GPS (frames D18/M18 from Penpot). Seen flag in `localStorage` and `users.onboarding_seen_at`; replay from the menu. |
 | **3 — Services and booking** | Boarding, dog walking, and in-home (visit or overnight). Quote + create ignore client totals; overlap locked in a transaction; Stripe TEST Checkout + signed webhook; sitter accept/decline; `waiting_confirm → waiting_service → in_service → completed` (or `cancelled`). Conversation `booking_id` set on create. See `docs/phase3-api.md`. |
-| **4 — Live GPS walks** | Walker posts points every 5–10s. Owner subscribes to the trail. Summary (distance, duration, polyline) is stored on the walk when it ends. |
+| **4 — Live GPS walks** | Walker posts points every 5–10s (batches OK) while a dog-walking booking is `in_service`. Owner live view is SSE (same LISTEN/NOTIFY stack as chat — see `docs/phase4-api.md`). Summary (distance, duration, start/end) is stored when the walk ends (`in_service → completed`). |
 | **5 — CCTV** | Free WebRTC: sitter browser camera, Supabase Realtime signalling, short-lived signed access, `camera:status` event. Grants are limited to the booking window. |
 
 ---
@@ -57,6 +57,7 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 - **Bookings** — Boarding / dog walking / in-home; server quote; owner create (cash or Stripe Checkout); sitter accept/decline and status workflow; cancel, reschedule, review, report
 - **Payments** — Stripe TEST Checkout Session (Phase 3) or PaymentIntent (legacy); webhook signature verification; cash payout on `in_service` / `completed`
 - **Payout** — Sitter earnings dashboard, Thai bank list, bank account + book-bank image upload
+- **GPS walks** — Sitter start/points/end on an in-service dog walk; owner SSE live trail; history + haversine summary. Leaflet + OSM on the client.
 - **Chat** — Owner–sitter messaging with image upload and SSE realtime events
 - **Notifications** — In-app notification list and read state
 - **Admin** — Sitter approval, owner ban, review moderation, booking oversight
@@ -74,7 +75,7 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 | **Auth** | Supabase Auth + JWT (JWKS) |
 | **Payments** | Stripe (webhooks, manual capture) |
 | **File upload** | multer → Supabase Storage (`photos` bucket) |
-| **Realtime chat** | PostgreSQL `LISTEN/NOTIFY` + Server-Sent Events |
+| **Realtime chat / GPS** | PostgreSQL `LISTEN/NOTIFY` + Server-Sent Events |
 | **Dev** | nodemon |
 | **Tests** | Node.js built-in test runner |
 
@@ -116,9 +117,11 @@ pet-sitter-app-server/
 │       ├── 003_onboarding_seen_at.sql
 │       ├── 004_clip_camera_grants_on_reschedule.sql
 │       ├── 005_conversation_booking_and_presence.sql
-│       └── 006_booking_phase3.sql
+│       ├── 006_booking_phase3.sql
+│       └── 007_walk_tracking.sql
 ├── docs/
-│   └── phase3-api.md           # Phase 3 request/response contract
+│   ├── phase3-api.md           # Phase 3 request/response contract
+│   └── phase4-api.md           # Phase 4 GPS walk contract (SSE + Leaflet)
 ├── package.json
 ├── routes/                 # HTTP route definitions
 │   ├── auth.route.mjs
@@ -344,6 +347,9 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | POST | `/:id/accept` | Sitter | `waiting_confirm` → `waiting_service` |
 | POST | `/:id/decline` | Sitter | `waiting_confirm` → `cancelled` |
 | PATCH | `/:id/status` | Sitter | Enforced transitions; `in_service` → `completed` |
+| POST | `/:id/walk/start` | Sitter | Start live GPS walk (`in_service` dog walking) |
+| POST | `/:id/walk/points` | Sitter | Post one point or a batch (5–10s, sanity checks) |
+| POST | `/:id/walk/end` | Sitter | End walk, store summary, complete booking |
 
 ### Owner bookings — `/api/bookings`
 
@@ -358,6 +364,9 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | POST | `/owner/:id/reschedule` | Bearer | Reschedule |
 | POST | `/owner/:id/review` | Bearer | Submit review (`completed`) |
 | POST | `/owner/:id/report` | Bearer | Report issue |
+| GET | `/:id/walk` | Bearer | Current walk + summary (owner or sitter; others 404) |
+| GET | `/:id/walk/points` | Bearer | Route history + summary |
+| GET | `/:id/walk/events` | Bearer | SSE live trail (same auth as chat SSE) |
 
 ### Banks — `/api/banks`
 
@@ -435,6 +444,8 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 
 **Booking payment (Stripe TEST):** Phase 3 `POST /api/bookings` with `serviceType` returns `checkoutUrl` (Checkout Session). Legacy create (no `serviceType`) returns `clientSecret` (PaymentIntent, manual capture on sitter confirm). Webhook `POST /api/webhooks/stripe` verifies `Stripe-Signature` and marks the payment paid. Full request/response shapes: [`docs/phase3-api.md`](docs/phase3-api.md).
 
+**GPS walks:** Walker `POST /api/sitters/bookings/:id/walk/{start,points,end}`. Owner live map: `GET /api/bookings/:id/walk/events` (SSE). History: `GET /api/bookings/:id/walk/points`. Why SSE instead of Supabase Realtime, plus Leaflet field names: [`docs/phase4-api.md`](docs/phase4-api.md).
+
 ---
 
 ## 📘 API Documentation (Swagger)
@@ -471,7 +482,7 @@ npm run dev
 npm test
 ```
 
-Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, service pricing, conflicts, status transitions, role checks, Stripe webhook signature, migration file order).
+Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, service pricing, conflicts, status transitions, role checks, Stripe webhook signature, GPS walk authz/validation/distance/SSE, migration file order).
 
 CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db:seed`, and `db:verify`. That check does not use a live Supabase project.
 

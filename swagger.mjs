@@ -16,7 +16,7 @@ export const swaggerSpec = swaggerJsdoc({
       title: "Pet Sitter API Documentation",
       version: "1.0.0",
       description:
-        "API for pet owner, sitter, booking, and admin. Phase 3: boarding / dog walking / in-home quote, checkout, and status lifecycle. See docs/phase3-api.md.",
+        "API for pet owner, sitter, booking, and admin. Phase 3: boarding / dog walking / in-home quote, checkout, and status lifecycle (docs/phase3-api.md). Phase 4: GPS walk tracking over SSE (docs/phase4-api.md).",
     },
     servers: [{ url: "http://localhost:4000" }],
     components: {
@@ -53,6 +53,30 @@ export const swaggerSpec = swaggerJsdoc({
             totalPrice: {
               type: "number",
               description: "Ignored. Server always recomputes.",
+            },
+          },
+        },
+        WalkPoint: {
+          type: "object",
+          required: ["lat", "lng"],
+          properties: {
+            lat: { type: "number", minimum: -90, maximum: 90 },
+            lng: { type: "number", minimum: -180, maximum: 180 },
+            accuracy: { type: "number", nullable: true },
+            recordedAt: { type: "string", format: "date-time" },
+          },
+        },
+        WalkPointsRequest: {
+          type: "object",
+          properties: {
+            lat: { type: "number" },
+            lng: { type: "number" },
+            accuracy: { type: "number" },
+            recordedAt: { type: "string", format: "date-time" },
+            points: {
+              type: "array",
+              maxItems: 60,
+              items: { $ref: "#/components/schemas/WalkPoint" },
             },
           },
         },

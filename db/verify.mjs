@@ -165,6 +165,16 @@ try {
     throw new Error("bookings.access_instructions is missing");
   }
 
+  const { rows: walkIdx } = await client.query(
+    `SELECT 1
+     FROM pg_indexes
+     WHERE schemaname = 'public'
+       AND indexname = 'walks_one_per_booking_idx'`
+  );
+  if (!walkIdx[0]) {
+    throw new Error("walks_one_per_booking_idx is missing");
+  }
+
   await assertCameraGrantsClipAndRevoke(client);
 
   console.log(`ok: ${TABLES.length} tables, ${walkRows[0].n} walk_points`);
