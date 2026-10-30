@@ -20,7 +20,7 @@ Free tiers only (Supabase, Stripe test mode, Render, browser WebRTC). No secrets
 
 | Phase | What |
 |-------|------|
-| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, `users.last_seen_at` + `conversations.booking_id` in `005`, booking Phase 3 columns in `006`, and walk unique-index + `NOTIFY` in `007`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
+| **1 — Schema** | Reverse-engineered existing Postgres schema as `db/migrations/001_init.sql`, plus services / cameras / grants / walks / walk_points in `002`, `users.onboarding_seen_at` in `003`, clip-camera grants on reschedule in `004`, `users.last_seen_at` + `conversations.booking_id` in `005`, booking Phase 3 columns in `006`, walk unique-index + `NOTIFY` in `007`, and CCTV `NOTIFY` / grant backfill in `008`. `npm run db:migrate` and `db:seed` against `DATABASE_URL`. |
 | **2 — Client design system** | Nunito; primary `#FF8A3D`, mint `#3CC8A8`, cream `#FFFAF3`. Restyle the existing app to the Penpot frames. First-visit onboarding: skippable welcome modal plus a 3–4 step walkthrough of services, booking, CCTV and GPS (frames D18/M18 from Penpot). Seen flag in `localStorage` and `users.onboarding_seen_at`; replay from the menu. |
 | **3 — Services and booking** | Boarding, dog walking, and in-home (visit or overnight). Quote + create ignore client totals; overlap locked in a transaction; Stripe TEST Checkout + signed webhook; sitter accept/decline; `waiting_confirm → waiting_service → in_service → completed` (or `cancelled`). Conversation `booking_id` set on create. See `docs/phase3-api.md`. |
 | **4 — Live GPS walks** | Walker posts points every 5–10s (batches OK) while a dog-walking booking is `in_service`. Owner live view is SSE (same LISTEN/NOTIFY stack as chat — see `docs/phase4-api.md`). Summary (distance, duration, start/end) is stored when the walk ends (`in_service → completed`). |
@@ -213,9 +213,10 @@ curl http://localhost:4000/health
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | Postgres URI for the query pool. Production may use the Supabase **transaction** pooler (port **6543**). SSL is on for `sslmode=require` (`{ rejectUnauthorized: false }`) and for `verify-ca` / `verify-full` (`{ rejectUnauthorized: true }`), even on localhost. Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
 | `LISTEN_DATABASE_URL` | Production if `DATABASE_URL` is a transaction pooler | Session pooler (port **5432**) or **direct** URI for `LISTEN/NOTIFY`. Used **only** by the chat, walk, and camera SSE listener clients. Transaction pooler connections cannot `LISTEN`. Falls back to `DATABASE_URL` outside that production check. Same SSL rules as the query pool, applied to this URI. In `NODE_ENV=production`, if `DATABASE_URL` is port **6543** or a pooler host with `pgbouncer`, missing `LISTEN_DATABASE_URL` fails at boot. A `LISTEN_DATABASE_URL` that is itself a transaction pooler (port **6543**, or a pooler host with `pgbouncer`) also fails at boot. |
-| `TURN_URLS` | No | Optional comma-separated TURN URLs for `GET /api/ice`. Google STUN is always returned. Placeholders only. |
-| `TURN_USERNAME` | No | Optional TURN username (never commit a real value). |
-| `TURN_CREDENTIAL` | No | Optional TURN credential (never commit a real value). |
+| `TURN_URLS` | No | Optional comma-separated TURN URLs for gated `GET /api/ice`. Google STUN is always returned. Placeholders only. |
+| `TURN_SECRET` | No | Optional coturn REST shared secret. When set, ICE issues short-lived HMAC creds (`username=expiry:userId`). Placeholder only. |
+| `TURN_USERNAME` | No | Optional static TURN username fallback when `TURN_SECRET` is unset (never commit a real value). |
+| `TURN_CREDENTIAL` | No | Optional static TURN credential fallback when `TURN_SECRET` is unset (never commit a real value). |
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only; Auth admin & storage (**never expose to FE**) |
 | `SUPABASE_JWKS_URL` | Yes | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
@@ -399,7 +400,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/` | Bearer | STUN `stun:stun.l.google.com:19302` plus optional TURN from env |
+| GET | `/` | Bearer | STUN + gated TURN. Query `cameraId` (camera sitter) and/or `bookingId` (owner with an active grant). HMAC creds when `TURN_SECRET` is set. |
 
 ### Banks — `/api/banks`
 
@@ -527,6 +528,7 @@ CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db
 - **`GET /api/users`** — Public list endpoint (consider restricting in production)
 - **Dual DB pool config** — `repositories/db.mjs` vs `utils/db.mjs` (both use `DATABASE_URL`)
 - **LISTEN/NOTIFY** — requires a session connection. Set `LISTEN_DATABASE_URL` to the session pooler (5432) or a direct URI when `DATABASE_URL` is the Supabase transaction pooler (port 6543). In production, a missing or transaction-pooler `LISTEN_DATABASE_URL` fails at boot. CCTV signalling uses the same listener pair as chat/walk.
+- **CCTV live sessions** — WebRTC session records are **in-memory on a single Render instance** (demo). Caps: 8 viewers per camera, **2 sessions per owner per camera**. A second instance would not share the map.
 
 ---
 

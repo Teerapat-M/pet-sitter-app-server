@@ -8,6 +8,7 @@ import {
   getCameraSession,
 } from "./cameraEvents.mjs";
 import { resetCameraSignalRate } from "../utils/cameraSignal.mjs";
+import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 
 const OWNER = "a1111111-1111-4111-8111-111111111111";
@@ -16,7 +17,11 @@ const OTHER = "a9999999-9999-4999-8999-999999999999";
 const BOOKING_ID = "b0000001-0001-4001-8001-000000000001";
 const WALK_BOOKING_ID = "b0000002-0002-4002-8002-000000000002";
 const CAMERA_ID = "ca000001-0001-4001-8001-000000000001";
+const OTHER_CAMERA_ID = "ca000001-0001-4001-8001-000000000002";
+const HOME_VENUE = "ve000001-0001-4001-8001-000000000001";
+const OTHER_VENUE = "ve000001-0001-4001-8001-000000000002";
 const NOW = new Date("2026-10-30T05:00:00.000Z");
+const TURN_SECRET = "test-turn-secret";
 
 function boarding(overrides = {}) {
   return {
@@ -304,5 +309,105 @@ describe("camerasService auth matrix", () => {
     const row = await service.heartbeat(SITTER, CAMERA_ID);
     assert.equal(row.status, "online");
     assert.equal(row.lastSeenAt, NOW.toISOString());
+  });
+
+  it("hides cameras at another venue and 403s signalling a mismatch", async () => {
+    state.bookings[BOOKING_ID] = boarding({ venue_id: HOME_VENUE });
+    state.cameras.push(
+      cameraRow({ id: OTHER_CAMERA_ID, venue_id: OTHER_VENUE, name: "Other home" })
+    );
+    state.grants.push(
+      grantRow({
+        id: OTHER_CAMERA_ID,
+        camera_id: OTHER_CAMERA_ID,
+        venue_id: OTHER_VENUE,
+        name: "Other home",
+      })
+    );
+    state.grants[0].venue_id = HOME_VENUE;
+    state.cameras[0].venue_id = HOME_VENUE;
+
+    const data = await service.listForBooking(OWNER, BOOKING_ID);
+    assert.equal(data.cameras.length, 1);
+    assert.equal(data.cameras[0].id, CAMERA_ID);
+
+    await assert.rejects(
+      () =>
+        service.postViewerSignal(OWNER, BOOKING_ID, OTHER_CAMERA_ID, {
+          type: "offer",
+          sessionId: "sess-venue",
+          sdp: "v=0",
+        }),
+      (err) => err.statusCode === 403 && /venue/.test(err.message)
+    );
+  });
+
+  it("429s a third live session from the same owner on one camera", async () => {
+    await service.postViewerSignal(OWNER, BOOKING_ID, CAMERA_ID, {
+      type: "offer",
+      sessionId: "sess-a",
+      sdp: "v=0",
+    });
+    await service.postViewerSignal(OWNER, BOOKING_ID, CAMERA_ID, {
+      type: "offer",
+      sessionId: "sess-b",
+      sdp: "v=0",
+    });
+    await assert.rejects(
+      () =>
+        service.postViewerSignal(OWNER, BOOKING_ID, CAMERA_ID, {
+          type: "offer",
+          sessionId: "sess-c",
+          sdp: "v=0",
+        }),
+      (err) => err.statusCode === 429 && /sessions/.test(err.message)
+    );
+  });
+
+  it("gates GET ICE on cameraId or bookingId", async () => {
+    await assert.rejects(() => service.iceFor(OWNER, {}), (err) => err.statusCode === 400);
+    await assert.rejects(
+      () => service.iceFor(OTHER, { cameraId: CAMERA_ID }),
+      (err) => err.statusCode === 404
+    );
+    await assert.rejects(
+      () => service.iceFor(OWNER, { bookingId: WALK_BOOKING_ID }),
+      (err) => err.statusCode === 403
+    );
+  });
+
+  it("issues HMAC TURN creds to the camera sitter and a granted owner", async () => {
+    const env = {
+      TURN_URLS: "turn:turn.example.com:3478",
+      TURN_SECRET,
+      TURN_USERNAME: "static-user",
+      TURN_CREDENTIAL: "static-pass",
+    };
+    const sitterIce = await service.iceFor(SITTER, { cameraId: CAMERA_ID }, env);
+    const expiry = Math.floor(NOW.getTime() / 1000) + 300;
+    const username = `${expiry}:${SITTER}`;
+    assert.equal(sitterIce.iceServers[1].username, username);
+    assert.equal(
+      sitterIce.iceServers[1].credential,
+      createHmac("sha1", TURN_SECRET).update(username).digest("base64")
+    );
+    assert.notEqual(sitterIce.iceServers[1].username, "static-user");
+
+    const ownerIce = await service.iceFor(OWNER, { bookingId: BOOKING_ID }, env);
+    const ownerUser = `${expiry}:${OWNER}`;
+    assert.equal(ownerIce.iceServers[1].username, ownerUser);
+    assert.equal(
+      ownerIce.iceServers[1].credential,
+      createHmac("sha1", TURN_SECRET).update(ownerUser).digest("base64")
+    );
+  });
+
+  it("403s ICE when the camera is not at the booking venue", async () => {
+    state.bookings[BOOKING_ID] = boarding({ venue_id: HOME_VENUE });
+    state.grants[0].venue_id = OTHER_VENUE;
+    await assert.rejects(
+      () => service.iceFor(OWNER, { bookingId: BOOKING_ID, cameraId: CAMERA_ID }),
+      (err) => err.statusCode === 403 && /venue/.test(err.message)
+    );
   });
 });

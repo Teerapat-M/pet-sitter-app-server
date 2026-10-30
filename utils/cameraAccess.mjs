@@ -63,6 +63,30 @@ export function assertCameraEnabled(camera) {
   }
 }
 
+function asVenueId(value) {
+  if (value == null || value === "") return null;
+  return String(value);
+}
+
+export function cameraVenueId(camera) {
+  return asVenueId(camera?.venue_id ?? camera?.venueId);
+}
+
+export function bookingVenueId(booking) {
+  return asVenueId(booking?.venue_id ?? booking?.venueId);
+}
+
+/** Null venue is the sitter's default home. Both must match. */
+export function cameraMatchesBookingVenue(camera, booking) {
+  return cameraVenueId(camera) === bookingVenueId(booking);
+}
+
+export function assertCameraMatchesBookingVenue(camera, booking) {
+  if (!cameraMatchesBookingVenue(camera, booking)) {
+    throw httpError(403, "Camera is not at this booking's venue");
+  }
+}
+
 export function viewerOrSitterRole(booking, userId) {
   if (!booking) {
     throw httpError(404, "Booking not found");

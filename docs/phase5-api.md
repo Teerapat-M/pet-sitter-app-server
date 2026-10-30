@@ -107,22 +107,27 @@ Disabled cameras stay in the list (`isEnabled: false`) so the tile can show “S
 
 ## ICE
 
-`GET /api/ice` (Bearer)
+`GET /api/ice?cameraId=&bookingId=` (Bearer)
+
+Not a public STUN/TURN dump. The caller must pass **`cameraId`** (must be that camera’s sitter) and/or **`bookingId`** (must be the booking owner with an **active grant**). Missing both → `400`. Wrong party → `404`. Owner without a covering grant / wrong venue → `403`.
 
 Always includes Google STUN. Optional TURN from env (placeholders only — never commit real credentials):
+
+- When `TURN_SECRET` is set: coturn REST HMAC — `username = <unixExpiry>:<userId>`, `credential = base64(HMAC-SHA1(secret, username))`, TTL 300s.
+- Static `TURN_USERNAME` / `TURN_CREDENTIAL` are a **fallback only** when `TURN_SECRET` is unset, and are still gated behind the grant/sitter check.
 
 ```json
 {
   "data": {
     "iceServers": [
       { "urls": ["stun:stun.l.google.com:19302"] },
-      { "urls": ["turn:turn.example.com:3478"], "username": "…", "credential": "…" }
+      { "urls": ["turn:turn.example.com:3478"], "username": "expiry:userId", "credential": "…" }
     ]
   }
 }
 ```
 
-Free tier: STUN-only is enough on many networks. Set `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL` if you add a TURN server later.
+Free tier: STUN-only is enough on many networks. Set `TURN_URLS` + `TURN_SECRET` (preferred) or static user/pass if you add a TURN server later.
 
 ---
 
@@ -154,7 +159,7 @@ venue device                         API                            owner app
      |                                |  camera:status online           |
      |                                | ------------------------------> | GET /bookings/:id/cameras
      |                                |                                 | GET /bookings/:id/cameras/events
-     |                                |                                 | GET /ice
+     |                                |                                 | GET /ice?bookingId=
      |                                |     POST …/signal offer         |
      |  SSE signal offer              | <------------------------------ |
      | POST …/signal answer           |                                 |
@@ -164,18 +169,33 @@ venue device                         API                            owner app
      | ============ SRTP media P2P (or TURN) ============               |
 ```
 
-Limits: signalling body ≤ **6000** bytes (`413`); **40** posts / minute / camera+user (`429`); **8** live viewers / camera (`429`). SDP/ICE are relayed in memory + NOTIFY, not written to a table.
+Limits (UTF-8 **bytes**, not JS string length — Thai SDP is 3 bytes/char):
+
+- signalling body ≤ **6000** bytes (`413`)
+- full `pg_notify` JSON ≤ **7000** bytes, under Postgres’s 8000-byte cap (`413`)
+- **40** posts / minute / camera+user (`429`)
+- **8** live viewers / camera (`429`)
+- **2** live sessions / owner / camera (`429`)
+
+Live session records are **in-memory on a single Render instance** (demo). They are not shared across processes and are lost on restart. SDP/ICE are relayed in memory + NOTIFY, not written to a table.
+
+A camera is listed / signalled only when `cameras.venue_id` matches `bookings.venue_id` (`IS NOT DISTINCT FROM`; both null = sitter’s default home). Mismatch → `403`.
+
+---
+
+Sitter SSE (`GET /api/sitters/cameras/events`) is scoped to **that sitter**. `camera:status` from another sitter’s camera is not delivered (the subscriber stores `sitterId`).
 
 ---
 
 ## Authz
 
-Strangers get `404` (hide existence). The booking owner is a known party: wrong service / status / window / disabled camera → `403`.
+Strangers get `404` (hide existence). The booking owner is a known party: wrong service / status / window / venue / disabled camera → `403`.
 
 | Actor | GET booking cameras | POST viewer signal | Sitter CRUD / heartbeat / publisher signal |
 |-------|---------------------|--------------------|---------------------------------------------|
 | Booking sitter (own cameras) | 200 | — (use publisher path) | 200 |
-| Booking owner, in-service boarding, in window, camera enabled | 200 | 200 | 404 |
+| Booking owner, in-service boarding, in window, camera at this venue, enabled | 200 | 200 | 404 |
+| Booking owner, camera at another venue | **403** (or omitted from list) | **403** | 404 |
 | Booking owner, camera disabled | 200 (listed) | **403** | 404 |
 | Booking owner, outside grant window | **403** | **403** | 404 |
 | Booking owner, not `in_service` | **403** | **403** | 404 |
@@ -187,6 +207,6 @@ Strangers get `404` (hide existence). The booking owner is a known party: wrong 
 
 ## Migration
 
-`008_cctv_webrtc.sql` — `NOTIFY camera_events` on camera status/`is_enabled`; auto-insert `camera_access_grants` for boarding bookings (window = check-in/out in `Asia/Bangkok`). Columns `status`, `is_enabled`, `last_seen_at` already exist from `002`.
+`008_cctv_webrtc.sql` — `NOTIFY camera_events` on camera status/`is_enabled`; auto-insert `camera_access_grants` for boarding bookings (window = check-in/out in `Asia/Bangkok`). Grants match camera/booking `venue_id` (`IS NOT DISTINCT FROM`). The trigger also runs on date/time changes (`start_date`, `end_date`, `start_time`, `end_time`) and upserts `validFrom`/`validTo` (`ON CONFLICT DO UPDATE`, idempotent). Existing **`in_service` boarding** bookings are backfilled. Columns `status`, `is_enabled`, `last_seen_at` already exist from `002`. Optional `bookings.venue_id` (null = sitter default home).
 
 **Do not apply from the app.** Projects Manager applies it. 001–007 are already on the live DB after Phase 4. This PR does not touch any live database.

@@ -5,7 +5,10 @@ import {
   listenClientConfig,
 } from "../utils/listenDb.mjs";
 import { utcIso, utcIsoFields } from "../utils/iso.mjs";
-import { MAX_VIEWERS_PER_CAMERA } from "../utils/cameraSignal.mjs";
+import {
+  MAX_SESSIONS_PER_OWNER_PER_CAMERA,
+  MAX_VIEWERS_PER_CAMERA,
+} from "../utils/cameraSignal.mjs";
 import { httpError } from "../utils/httpError.mjs";
 import { camerasRepository } from "../repositories/cameras.repository.mjs";
 
@@ -47,9 +50,16 @@ function subscriberMatches(sub, event) {
     if (!event.bookingId || String(event.bookingId) !== String(sub.bookingId)) {
       return false;
     }
-  }
-  if (sub.sitterId) {
-    if (event.sitterId && String(event.sitterId) !== String(sub.sitterId)) {
+  } else {
+    // Sitter/publisher stream: never deliver another sitter's events.
+    if (sub.sitterId) {
+      if (event.sitterId && String(event.sitterId) !== String(sub.sitterId)) {
+        return false;
+      }
+      if (!event.sitterId && String(event.toUserId ?? "") !== String(sub.userId)) {
+        return false;
+      }
+    } else if (String(event.toUserId ?? "") !== String(sub.userId)) {
       return false;
     }
   }
@@ -117,6 +127,10 @@ export function openCameraSession({
   const live = listSessionsForCamera(cameraId);
   if (live.length >= MAX_VIEWERS_PER_CAMERA) {
     throw httpError(429, "Too many live viewers for this camera");
+  }
+  const mine = live.filter((row) => String(row.viewerId) === String(viewerId));
+  if (mine.length >= MAX_SESSIONS_PER_OWNER_PER_CAMERA) {
+    throw httpError(429, "Too many live sessions for this camera");
   }
   const session = {
     sessionId: key,
@@ -315,6 +329,7 @@ export function subscribeCameraEvents(sub, req, res, snapshot = null) {
 
   const record = {
     userId: String(sub.userId),
+    sitterId: sub.sitterId ? String(sub.sitterId) : null,
     bookingId: sub.bookingId ? String(sub.bookingId) : null,
     cameraIds: sub.cameraIds
       ? new Set([...sub.cameraIds].map((id) => String(id)))

@@ -3,13 +3,16 @@ import { httpError } from "../utils/httpError.mjs";
 import { utcIso } from "../utils/iso.mjs";
 import {
   assertCameraEnabled,
+  assertCameraMatchesBookingVenue,
   assertOwnerLiveView,
   assertSitterCamera,
+  cameraMatchesBookingVenue,
   grantCoversAt,
   viewerOrSitterRole,
 } from "../utils/cameraAccess.mjs";
 import {
   assertCameraSignalRate,
+  assertNotifyPayloadSize,
   parseSignalBody,
 } from "../utils/cameraSignal.mjs";
 import { iceConfigFromEnv } from "../utils/iceConfig.mjs";
@@ -79,7 +82,7 @@ export function createCamerasService({
     await camerasRepo.notify(CAMERA_CHANNEL, JSON.stringify(payload));
   },
   now = () => new Date(),
-  iceConfig = (env) => iceConfigFromEnv(env),
+  iceConfig = (userId, env, opts) => iceConfigFromEnv(env, { userId, ...opts }),
 } = {}) {
   async function loadSitterCamera(userId, cameraId) {
     const camera = await camerasRepo.findById(cameraId);
@@ -93,8 +96,41 @@ export function createCamerasService({
   }
 
   return {
-    iceConfig(env = process.env) {
-      return iceConfig(env);
+    async iceFor(userId, { cameraId, bookingId } = {}, env = process.env) {
+      const camId = cameraId ? requireUuid(cameraId, "cameraId") : null;
+      const bookId = bookingId ? requireUuid(bookingId, "bookingId") : null;
+      if (!camId && !bookId) {
+        throw httpError(400, "cameraId or bookingId is required");
+      }
+
+      if (camId) {
+        const camera = await camerasRepo.findById(camId);
+        if (camera && String(camera.sitter_id) === String(userId)) {
+          return iceConfig(userId, env, { now: now() });
+        }
+      }
+
+      if (bookId) {
+        const booking = await camerasRepo.findBookingForCamera(bookId);
+        if (!booking) {
+          throw httpError(404, "Booking not found");
+        }
+        if (camId) {
+          const grant = await camerasRepo.findGrant(booking.id, camId);
+          ownerGrantOr403(booking, userId, grant);
+          assertCameraMatchesBookingVenue(grant, booking);
+        } else {
+          const grants = await camerasRepo.listGrantsForBooking(booking.id);
+          const covering = grants.filter(
+            (grant) =>
+              grantCoversAt(grant, now()) && cameraMatchesBookingVenue(grant, booking)
+          );
+          ownerGrantOr403(booking, userId, covering[0] ?? null);
+        }
+        return iceConfig(userId, env, { now: now() });
+      }
+
+      throw httpError(404, "Camera not found");
     },
 
     async listMine(userId) {
@@ -166,7 +202,9 @@ export function createCamerasService({
         throw httpError(404, "Booking not found");
       }
       const role = viewerOrSitterRole(booking, userId);
-      const grants = await camerasRepo.listGrantsForBooking(booking.id);
+      const grants = (await camerasRepo.listGrantsForBooking(booking.id)).filter(
+        (row) => cameraMatchesBookingVenue(row, booking)
+      );
       if (role === "owner") {
         const covering = grants.filter((grant) => grantCoversAt(grant, now()));
         ownerGrantOr403(booking, userId, covering[0] ?? null);
@@ -235,6 +273,7 @@ export function createCamerasService({
         sdp: signal.sdp,
         candidate: signal.candidate,
       };
+      assertNotifyPayloadSize(payload);
       await notify(payload);
       return { ok: true, sessionId: signal.sessionId };
     },
@@ -249,6 +288,7 @@ export function createCamerasService({
       const camId = requireUuid(cameraId, "cameraId");
       const grant = await camerasRepo.findGrant(booking.id, camId);
       ownerGrantOr403(booking, userId, grant);
+      assertCameraMatchesBookingVenue(grant, booking);
       assertCameraEnabled(grant);
       const signal = parseSignalBody(body);
       const at = now();
@@ -289,6 +329,7 @@ export function createCamerasService({
         sdp: signal.sdp,
         candidate: signal.candidate,
       };
+      assertNotifyPayloadSize(payload);
       await notify(payload);
       return { ok: true, sessionId: signal.sessionId };
     },

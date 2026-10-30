@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import {
+  MAX_NOTIFY_BYTES,
   MAX_SIGNAL_BYTES,
   MAX_SIGNALS_PER_MINUTE,
+  PG_NOTIFY_LIMIT_BYTES,
   assertCameraSignalRate,
+  assertNotifyPayloadSize,
   parseSignalBody,
   resetCameraSignalRate,
+  utf8ByteLength,
 } from "./cameraSignal.mjs";
 
 describe("parseSignalBody", () => {
@@ -36,6 +40,17 @@ describe("parseSignalBody", () => {
     );
   });
 
+  it("413s a Thai payload that fits char length but exceeds UTF-8 bytes", () => {
+    const thai = "ก".repeat(2500);
+    assert.equal(thai.length, 2500);
+    assert.ok(thai.length < MAX_SIGNAL_BYTES);
+    assert.ok(Buffer.byteLength(thai, "utf8") > MAX_SIGNAL_BYTES);
+    assert.throws(
+      () => parseSignalBody({ type: "offer", sessionId: "s1", sdp: thai }),
+      (err) => err.statusCode === 413
+    );
+  });
+
   it("rejects unknown types and missing sdp", () => {
     assert.throws(
       () => parseSignalBody({ type: "bye", sessionId: "s1" }),
@@ -44,6 +59,28 @@ describe("parseSignalBody", () => {
     assert.throws(
       () => parseSignalBody({ type: "offer", sessionId: "s1" }),
       (err) => err.statusCode === 400
+    );
+  });
+});
+
+describe("assertNotifyPayloadSize", () => {
+  it("measures the full NOTIFY JSON in UTF-8 bytes, under the PG 8000 cap", () => {
+    assert.equal(PG_NOTIFY_LIMIT_BYTES, 8000);
+    assert.ok(MAX_NOTIFY_BYTES < PG_NOTIFY_LIMIT_BYTES);
+    const thai = "ก".repeat(2400);
+    const payload = {
+      type: "signal",
+      kind: "offer",
+      sessionId: "s1",
+      cameraId: "ca000001-0001-4001-8001-000000000001",
+      bookingId: "b0000001-0001-4001-8001-000000000001",
+      sdp: thai,
+    };
+    assert.ok(JSON.stringify(payload).length < MAX_NOTIFY_BYTES);
+    assert.ok(utf8ByteLength(payload) > MAX_NOTIFY_BYTES);
+    assert.throws(
+      () => assertNotifyPayloadSize(payload),
+      (err) => err.statusCode === 413
     );
   });
 });

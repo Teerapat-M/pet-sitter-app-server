@@ -132,6 +132,7 @@ export function createCamerasRepository({
            bookings.sitter_id,
            bookings.status,
            bookings.duration_unit,
+           bookings.venue_id,
            services.type AS service_type,
            ((bookings.start_date + bookings.start_time) AT TIME ZONE 'Asia/Bangkok') AS booking_start,
            ((COALESCE(bookings.end_date, bookings.start_date) + bookings.end_time) AT TIME ZONE 'Asia/Bangkok') AS booking_end

@@ -1,9 +1,14 @@
 import { httpError } from "./httpError.mjs";
 
 export const SIGNAL_TYPES = ["offer", "answer", "ice"];
+/** First-pass cap on the request body (UTF-8 bytes). */
 export const MAX_SIGNAL_BYTES = 6000;
+/** Full pg_notify JSON must stay under Postgres's 8000-byte payload limit. */
+export const PG_NOTIFY_LIMIT_BYTES = 8000;
+export const MAX_NOTIFY_BYTES = 7000;
 export const MAX_SIGNALS_PER_MINUTE = 40;
 export const MAX_VIEWERS_PER_CAMERA = 8;
+export const MAX_SESSIONS_PER_OWNER_PER_CAMERA = 2;
 
 const windows = new Map();
 
@@ -31,12 +36,26 @@ function asNonEmptyString(value, field) {
   return value;
 }
 
+export function utf8ByteLength(value) {
+  const encoded = typeof value === "string" ? value : JSON.stringify(value);
+  return Buffer.byteLength(encoded, "utf8");
+}
+
+/** Reject payloads that would exceed the Postgres NOTIFY 8000-byte limit. */
+export function assertNotifyPayloadSize(payload, { maxBytes = MAX_NOTIFY_BYTES } = {}) {
+  const encoded = typeof payload === "string" ? payload : JSON.stringify(payload);
+  if (Buffer.byteLength(encoded, "utf8") > maxBytes) {
+    throw httpError(413, "Signalling payload is too large");
+  }
+  return encoded;
+}
+
 export function parseSignalBody(body, { maxBytes = MAX_SIGNAL_BYTES } = {}) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw httpError(400, "Signalling body is required");
   }
   const encoded = JSON.stringify(body);
-  if (encoded.length > maxBytes) {
+  if (Buffer.byteLength(encoded, "utf8") > maxBytes) {
     throw httpError(413, "Signalling payload is too large");
   }
   const type = String(body.type ?? body.kind ?? "").toLowerCase();

@@ -60,7 +60,11 @@ export const camerasController = {
 
   async ice(req, res, next) {
     try {
-      return res.status(200).json({ data: camerasService.iceConfig() });
+      const data = await camerasService.iceFor(req.user.id, {
+        cameraId: req.query.cameraId ?? req.query.camera_id,
+        bookingId: req.query.bookingId ?? req.query.booking_id,
+      });
+      return res.status(200).json({ data });
     } catch (error) {
       next(error);
     }

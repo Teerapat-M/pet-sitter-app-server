@@ -28,6 +28,11 @@ describe("listMigrationFiles", () => {
     assert.match(sql, /pg_notify\('camera_events'/);
     assert.match(sql, /ensure_camera_grants_for_booking/);
     assert.match(sql, /cameras_status_notify/);
+    assert.match(sql, /UPDATE OF status, service_id, venue_id, start_date, end_date, start_time, end_time/);
+    assert.match(sql, /Idempotent backfill/);
+    assert.match(sql, /b\.status = 'in_service'/);
+    assert.match(sql, /c\.venue_id IS NOT DISTINCT FROM rec\.venue_id/);
+    assert.match(sql, /ON CONFLICT \(booking_id, camera_id\) DO UPDATE SET/);
   });
 
   it("007 unique-indexes one walk per booking after deleting extras", () => {

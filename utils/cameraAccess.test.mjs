@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   assertCameraEnabled,
+  assertCameraMatchesBookingVenue,
   assertOwnerLiveView,
   assertSitterCamera,
+  cameraMatchesBookingVenue,
   grantCoversAt,
   isBoardingBooking,
 } from "./cameraAccess.mjs";
@@ -95,6 +97,34 @@ describe("assertOwnerLiveView", () => {
   it("allows the owner during an in-service boarding window", () => {
     assert.doesNotThrow(() =>
       assertOwnerLiveView(boarding(), OWNER, { grant: GRANT, now: NOW })
+    );
+  });
+});
+
+describe("cameraMatchesBookingVenue", () => {
+  const HOME = "ve000001-0001-4001-8001-000000000001";
+  const OTHER_VENUE = "ve000001-0001-4001-8001-000000000002";
+
+  it("matches when both venues are the default home (null)", () => {
+    assert.equal(cameraMatchesBookingVenue({ venue_id: null }, { venue_id: null }), true);
+  });
+
+  it("rejects a camera tagged to another venue", () => {
+    assert.equal(
+      cameraMatchesBookingVenue({ venue_id: OTHER_VENUE }, { venue_id: HOME }),
+      false
+    );
+    assert.equal(
+      cameraMatchesBookingVenue({ venue_id: OTHER_VENUE }, { venue_id: null }),
+      false
+    );
+    assert.throws(
+      () =>
+        assertCameraMatchesBookingVenue(
+          { venue_id: OTHER_VENUE },
+          boarding({ venue_id: HOME })
+        ),
+      (err) => err.statusCode === 403 && /venue/.test(err.message)
     );
   });
 });
