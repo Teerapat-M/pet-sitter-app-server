@@ -196,11 +196,11 @@ curl http://localhost:4000/health
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | Postgres URI. SSL is on for `sslmode=require` / `verify-ca` / `verify-full` (even on localhost). Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
+| `DATABASE_URL` | Yes | Postgres URI. SSL is on for `sslmode=require` (`{ rejectUnauthorized: false }`) and for `verify-ca` / `verify-full` (`{ rejectUnauthorized: true }`), even on localhost. Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only; Auth admin & storage (**never expose to FE**) |
 | `SUPABASE_JWKS_URL` | Yes | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
-| `FRONTEND_URL` | Yes | Frontend base URL for password-reset redirects (no trailing `/`) |
+| `FRONTEND_URL` | Yes | Comma-separated frontend origins for CORS (localhost / `127.0.0.1` on ports 3000 and 3001 are always allowed). First URL is the password-reset redirect base (no trailing `/`) |
 | `STRIPE_SECRET_KEY` | For payments | Stripe secret key |
 | `STRIPE_WEBHOOK_SECRET` | For webhooks | Webhook signing secret for `/api/webhooks/stripe` |
 | `PORT` | No | Default `4000` (Render sets this automatically) |
@@ -446,7 +446,7 @@ npm run dev
 4. Health check path: `/health`
 5. **Stripe webhook:** `https://pet-sitter-app-server.onrender.com/api/webhooks/stripe`
 6. **Supabase:** Add production FE URL to Auth redirect allow list
-7. **`FRONTEND_URL`:** Production Vercel URL (no trailing slash)
+7. **`FRONTEND_URL`:** Production frontend origin (no trailing slash). Comma-separate extra origins if needed; localhost defaults stay allowed.
 
 ---
 

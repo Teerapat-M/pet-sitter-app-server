@@ -65,7 +65,7 @@ describe("sslForDatabaseUrl", () => {
       sslForDatabaseUrl(
         "postgres://u:p@localhost:5432/db?sslmode=verify-ca"
       ),
-      { rejectUnauthorized: false }
+      { rejectUnauthorized: true }
     );
   });
 
@@ -74,7 +74,7 @@ describe("sslForDatabaseUrl", () => {
       sslForDatabaseUrl(
         "postgres://u:p@127.0.0.1:5432/db?sslmode=verify-full"
       ),
-      { rejectUnauthorized: false }
+      { rejectUnauthorized: true }
     );
   });
 

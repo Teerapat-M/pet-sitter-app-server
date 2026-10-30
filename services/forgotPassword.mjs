@@ -1,5 +1,6 @@
 import { parseEmail } from "../utils/authValidation.mjs";
 import { httpError } from "../utils/httpError.mjs";
+import { parseFrontendOrigins } from "../utils/corsOrigins.mjs";
 
 /**
  * Ticket #2 — Forgot password
@@ -50,13 +51,13 @@ export async function runForgotPassword(email, deps) {
 
 /** สร้าง URL ที่ Supabase จะพา user ไปหลังคลิกลิงก์ในอีเมล */
 export function buildResetRedirectUrl(frontendUrl = process.env.FRONTEND_URL) {
-  if (!frontendUrl || !String(frontendUrl).trim()) {
+  const [base] = parseFrontendOrigins(frontendUrl);
+  if (!base) {
     throw httpError(
       500,
       "FRONTEND_URL is not configured (needed for password reset links)"
     );
   }
 
-  const base = String(frontendUrl).trim().replace(/\/$/, "");
   return `${base}/reset-password`;
 }

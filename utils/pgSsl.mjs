@@ -1,7 +1,7 @@
 /** SSL for pg: off on loopback, unix sockets, or sslmode=disable; otherwise rejectUnauthorized false. */
 
 const SSL_ON = { rejectUnauthorized: false };
-const FORCE_SSL_ON = new Set(["require", "verify-ca", "verify-full"]);
+const SSL_VERIFY = { rejectUnauthorized: true };
 
 function decodeHost(value) {
   if (!value) return "";
@@ -37,7 +37,8 @@ export function sslForDatabaseUrl(connectionString) {
 
   const sslmode = url.searchParams.get("sslmode")?.toLowerCase();
   if (sslmode === "disable") return undefined;
-  if (FORCE_SSL_ON.has(sslmode)) return SSL_ON;
+  if (sslmode === "require") return SSL_ON;
+  if (sslmode === "verify-ca" || sslmode === "verify-full") return SSL_VERIFY;
 
   if (unixSocketHost(url)) return undefined;
 
