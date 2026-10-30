@@ -179,6 +179,8 @@ npm run db:seed      # demo owners, sitters, pets, bookings, cameras, walks
 
 Both commands read `DATABASE_URL`. Use the **direct** Postgres URI (port 5432), not the pooler, for DDL. Do not point these scripts at production unless you intend to.
 
+Chat and GPS SSE use PostgreSQL `LISTEN/NOTIFY` on a **dedicated session connection**. If `DATABASE_URL` is the transaction pooler (`:6543`), set `LISTEN_DATABASE_URL` to the session pooler (`:5432`) or the direct URI. The query pool is unchanged. Listeners reconnect on connection error.
+
 Migrations use `NULLS NOT DISTINCT` unique indexes and `EXECUTE FUNCTION` triggers, so **PostgreSQL 15 or later** is required (Supabase current Postgres and the CI service image both qualify).
 
 ### Run locally
@@ -204,7 +206,8 @@ curl http://localhost:4000/health
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | Postgres URI. SSL is on for `sslmode=require` (`{ rejectUnauthorized: false }`) and for `verify-ca` / `verify-full` (`{ rejectUnauthorized: true }`), even on localhost. Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
+| `DATABASE_URL` | Yes | Postgres URI for the query pool. Production may use the Supabase **transaction** pooler (port **6543**). SSL is on for `sslmode=require` (`{ rejectUnauthorized: false }`) and for `verify-ca` / `verify-full` (`{ rejectUnauthorized: true }`), even on localhost. Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
+| `LISTEN_DATABASE_URL` | No | Session pooler (port **5432**) or **direct** URI for `LISTEN/NOTIFY`. Used **only** by the chat and walk SSE listener clients. Transaction pooler connections cannot `LISTEN`. Falls back to `DATABASE_URL`. Same SSL rules as the query pool, applied to this URI. |
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only; Auth admin & storage (**never expose to FE**) |
 | `SUPABASE_JWKS_URL` | Yes | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
@@ -482,7 +485,7 @@ npm run dev
 npm test
 ```
 
-Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, service pricing, conflicts, status transitions, role checks, Stripe webhook signature, GPS walk authz/validation/distance/SSE, migration file order).
+Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, service pricing, conflicts, status transitions, role checks, Stripe webhook signature, GPS walk authz/validation/distance/SSE, LISTEN_DATABASE_URL fallback, migration file order).
 
 CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db:seed`, and `db:verify`. That check does not use a live Supabase project.
 
@@ -493,6 +496,7 @@ CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db
 - **`GET /api/reports`** — No admin auth yet (marked TODO in routes)
 - **`GET /api/users`** — Public list endpoint (consider restricting in production)
 - **Dual DB pool config** — `repositories/db.mjs` vs `utils/db.mjs` (both use `DATABASE_URL`)
+- **LISTEN/NOTIFY** — requires a session connection. Set `LISTEN_DATABASE_URL` when `DATABASE_URL` is the Supabase transaction pooler (port 6543).
 
 ---
 

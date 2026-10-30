@@ -1,4 +1,9 @@
-import { pool } from "../repositories/db.mjs";
+import {
+  closeListenClient,
+  createListenClient,
+  isTransactionPoolerUrl,
+  listenClientConfig,
+} from "../utils/listenDb.mjs";
 
 const CHANNEL = "walk_events";
 const clients = new Map();
@@ -68,31 +73,36 @@ function scheduleReconnect() {
     reconnectTimer = null;
     startWalkListener();
   }, 3000);
+  reconnectTimer.unref?.();
 }
 
 export async function startWalkListener() {
-  if (listenClient) {
-    try {
-      listenClient.removeAllListeners();
-      listenClient.release();
-    } catch {
-      // ignore
-    }
-    listenClient = null;
-  }
+  const previous = listenClient;
+  listenClient = null;
+  await closeListenClient(previous);
 
+  let client;
   try {
-    const client = await pool.connect();
+    const config = listenClientConfig();
+    if (isTransactionPoolerUrl(config.connectionString)) {
+      console.warn(
+        "Walk LISTEN is using a transaction pooler (port 6543). Set LISTEN_DATABASE_URL to the session pooler (5432) or a direct URI."
+      );
+    }
+    client = createListenClient();
+    await client.connect();
     listenClient = client;
 
     client.on("error", (error) => {
       console.error("Walk realtime connection error:", error.message);
+      if (listenClient === client) listenClient = null;
+      closeListenClient(client).catch(() => {});
+      scheduleReconnect();
+    });
+
+    client.on("end", () => {
+      if (listenClient !== client) return;
       listenClient = null;
-      try {
-        client.release();
-      } catch {
-        // ignore
-      }
       scheduleReconnect();
     });
 
@@ -107,6 +117,7 @@ export async function startWalkListener() {
     console.log("Walk realtime listener ready");
   } catch (error) {
     listenClient = null;
+    await closeListenClient(client);
     console.error("Walk realtime listener failed:", error.message);
     scheduleReconnect();
   }

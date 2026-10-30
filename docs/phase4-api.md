@@ -12,7 +12,8 @@ Walker (the booking’s sitter) posts a point every 5–10 seconds while the **d
 Chat already fans out over **PostgreSQL `LISTEN/NOTIFY` + Server-Sent Events** (`GET /api/conversations/events`). Walk points reuse that stack:
 
 - `walk_points` / `walks` fire `pg_notify('walk_events', …)` (migration `007`)
-- the API holds one `LISTEN` connection and writes SSE frames to subscribers of that `bookingId`
+- the API holds one dedicated `LISTEN` connection (chat has another) and writes SSE frames to subscribers of that `bookingId`
+- that listener uses `LISTEN_DATABASE_URL` (session pooler `:5432` or direct) when set, otherwise `DATABASE_URL`. The query pool can stay on the transaction pooler (`:6543`), which cannot `LISTEN`
 - no extra Realtime product, RLS policies, or client keys on the free tier
 - same `Authorization: Bearer` header as the rest of the API (use `fetch` + `ReadableStream`; `EventSource` cannot set headers)
 
