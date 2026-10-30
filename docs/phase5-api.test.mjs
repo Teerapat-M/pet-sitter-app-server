@@ -19,8 +19,9 @@ describe("docs/phase5-api.md ICE contract", () => {
     assert.match(md, /16384/);
     assert.match(md, /signal-ref/);
     assert.match(md, /009_camera_signals\.sql/);
-    assert.match(md, /findSignal\(id, \{ userId/);
-    assert.match(md, /cross-user fetch returns no row/);
+    assert.match(md, /findSignalById/);
+    assert.match(md, /fans out in memory/);
+    assert.match(md, /Invalid UUIDs/);
     assert.match(md, /write-time authz/);
     assert.match(md, /2 per owner per camera/);
     assert.match(md, /8 total viewers per camera/);

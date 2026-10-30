@@ -1,4 +1,6 @@
 import connectionPool from "../utils/db.mjs";
+import { httpError } from "../utils/httpError.mjs";
+import { isUuid, requireUuid } from "../utils/uuid.mjs";
 
 /** Keep Pool/Client `this` — do not destructure `{ query } = pool`. */
 function bindQuery(client) {
@@ -134,6 +136,7 @@ export function createCamerasRepository({
     },
 
     async findById(cameraId, q = query) {
+      if (!isUuid(cameraId)) return null;
       const { rows } = await q(
         `SELECT ${CAMERA_SELECT}
          FROM cameras
@@ -206,6 +209,7 @@ export function createCamerasRepository({
     },
 
     async findBookingForCamera(bookingId, q = query) {
+      if (!isUuid(bookingId)) return null;
       const { rows } = await q(
         `SELECT
            bookings.id,
@@ -227,6 +231,7 @@ export function createCamerasRepository({
     },
 
     async listGrantsForBooking(bookingId, q = query) {
+      if (!isUuid(bookingId)) return [];
       const { rows } = await q(
         `SELECT
            g.id,
@@ -246,6 +251,7 @@ export function createCamerasRepository({
     },
 
     async findGrant(bookingId, cameraId, q = query) {
+      if (!isUuid(bookingId) || !isUuid(cameraId)) return null;
       const { rows } = await q(
         `SELECT
            g.id,
@@ -293,6 +299,13 @@ export function createCamerasRepository({
     },
 
     async insertSignal({ sessionId, cameraId, bookingId, payload }, q = query) {
+      if (typeof sessionId !== "string" || sessionId.trim() === "") {
+        throw httpError(400, "Invalid sessionId");
+      }
+      requireUuid(cameraId, "cameraId");
+      if (bookingId != null && bookingId !== "") {
+        requireUuid(bookingId, "bookingId");
+      }
       const { rows } = await q(
         `WITH expired AS (
            DELETE FROM camera_signals
@@ -306,13 +319,32 @@ export function createCamerasRepository({
       return rows[0];
     },
 
+    async findSignalById(signalId, q = query) {
+      if (!isUuid(signalId)) return null;
+      const { rows } = await q(
+        `SELECT id, session_id, camera_id, booking_id, payload, created_at
+         FROM camera_signals
+         WHERE id = $1
+         LIMIT 1`,
+        [signalId]
+      );
+      return rows[0] ?? null;
+    },
+
     async findSignal(signalId, scope = {}, q = query) {
       if (typeof scope === "function") {
         q = scope;
         scope = {};
       }
-      if (!scopeUserId(scope)) {
+      if (!isUuid(signalId) || !scopeUserId(scope)) {
         return null;
+      }
+      if (scope.cameraId && !isUuid(scope.cameraId)) return null;
+      if (scope.bookingId && !isUuid(scope.bookingId)) return null;
+      if (scope.cameraIds instanceof Set) {
+        for (const id of scope.cameraIds) {
+          if (!isUuid(id)) return null;
+        }
       }
       const { sql, params } = buildFindSignalQuery(signalId, scope);
       const { rows } = await q(sql, params);

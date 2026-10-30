@@ -70,6 +70,58 @@ describe("signalMatchesScope", () => {
   });
 });
 
+describe("findSignalById", () => {
+  it("does not query Postgres for an invalid signal UUID", async () => {
+    let queried = false;
+    const repo = createCamerasRepository({
+      query: async () => {
+        queried = true;
+        return { rows: [row()] };
+      },
+    });
+    assert.equal(await repo.findSignalById("not-a-uuid"), null);
+    assert.equal(await repo.findSignalById("sig-1"), null);
+    assert.equal(queried, false);
+  });
+
+  it("400s insertSignal when cameraId or bookingId is not a UUID", async () => {
+    const repo = createCamerasRepository({
+      query: async () => {
+        throw new Error("must not reach Postgres");
+      },
+    });
+    await assert.rejects(
+      () =>
+        repo.insertSignal({
+          sessionId: "sess-1",
+          cameraId: "not-a-uuid",
+          bookingId: BOOKING_ID,
+          payload: {},
+        }),
+      (err) => err.statusCode === 400 && err.message === "Invalid cameraId"
+    );
+    await assert.rejects(
+      () =>
+        repo.insertSignal({
+          sessionId: "sess-1",
+          cameraId: CAMERA_ID,
+          bookingId: "bad-booking",
+          payload: {},
+        }),
+      (err) => err.statusCode === 400 && err.message === "Invalid bookingId"
+    );
+    await assert.rejects(
+      () =>
+        repo.insertSignal({
+          sessionId: "",
+          cameraId: CAMERA_ID,
+          payload: {},
+        }),
+      (err) => err.statusCode === 400 && err.message === "Invalid sessionId"
+    );
+  });
+});
+
 describe("findSignal", () => {
   it("does not query without a recipient userId", async () => {
     let queried = false;
@@ -81,6 +133,7 @@ describe("findSignal", () => {
     });
     assert.equal(await repo.findSignal(SIGNAL_ID), null);
     assert.equal(await repo.findSignal(SIGNAL_ID, {}), null);
+    assert.equal(await repo.findSignal("not-a-uuid", { userId: SITTER }), null);
     assert.equal(queried, false);
   });
 
