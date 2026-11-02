@@ -214,7 +214,10 @@ curl http://localhost:4000/health
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | Postgres URI for the query pool. Production may use the Supabase **transaction** pooler (port **6543**). SSL is on for `sslmode=require` (`{ rejectUnauthorized: false }`) and for `verify-ca` / `verify-full` (`{ rejectUnauthorized: true }`), even on localhost. Off for unix-socket hosts (`host=/…` or a host starting with `/`), loopback, or `sslmode=disable`. Otherwise `{ rejectUnauthorized: false }`. |
 | `LISTEN_DATABASE_URL` | Production if `DATABASE_URL` is a transaction pooler | Session pooler (port **5432**) or **direct** URI for `LISTEN/NOTIFY`. Used **only** by the chat, walk, and camera SSE listener clients. Transaction pooler connections cannot `LISTEN`. Falls back to `DATABASE_URL` outside that production check. Same SSL rules as the query pool, applied to this URI. In `NODE_ENV=production`, if `DATABASE_URL` is port **6543** or a pooler host with `pgbouncer`, missing `LISTEN_DATABASE_URL` fails at boot. A `LISTEN_DATABASE_URL` that is itself a transaction pooler (port **6543**, or a pooler host with `pgbouncer`) also fails at boot. |
-| `TURN_URLS` | No | Optional comma-separated TURN URLs for gated `GET /api/ice`. Google STUN is always returned. Placeholders only. |
+| `TURN_PROVIDER` | No | `cloudflare` to mint short-lived ICE via Cloudflare Realtime TURN. Leave blank for coturn HMAC / Metered static. See [`docs/turn.md`](docs/turn.md). |
+| `CLOUDFLARE_TURN_KEY_ID` | If `TURN_PROVIDER=cloudflare` | Cloudflare TURN key uid. Required in production when provider is cloudflare (boot fails if missing). Placeholder only. |
+| `CLOUDFLARE_TURN_API_TOKEN` | If `TURN_PROVIDER=cloudflare` | Cloudflare TURN key secret (Bearer). Never commit a real value. |
+| `TURN_URLS` | No | Optional comma-separated TURN URLs for gated `GET /api/ice` (coturn / Metered). Google STUN is always returned. Placeholders only. |
 | `TURN_SECRET` | No | Optional coturn REST shared secret. When set, ICE issues short-lived HMAC creds (`username=expiry:userId`). Placeholder only. |
 | `TURN_USERNAME` | No | Optional static TURN username fallback when `TURN_SECRET` is unset (never commit a real value). |
 | `TURN_CREDENTIAL` | No | Optional static TURN credential fallback when `TURN_SECRET` is unset (never commit a real value). |
@@ -401,7 +404,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/` | Bearer | STUN + gated TURN. Query `cameraId` (camera sitter) and/or `bookingId` (owner with an active grant). Disabled camera → 403. HMAC creds when `TURN_SECRET` is set. |
+| GET | `/` | Bearer | STUN + gated TURN. Query `cameraId` (camera sitter) and/or `bookingId` (owner with an active grant). Disabled camera → 403. Cloudflare mint when `TURN_PROVIDER=cloudflare`; HMAC creds when `TURN_SECRET` is set. |
 
 ### Banks — `/api/banks`
 
@@ -508,6 +511,7 @@ npm run dev
 5. **Stripe webhook:** `https://pet-sitter-app-server.onrender.com/api/webhooks/stripe`
 6. **Supabase:** Add production FE URL to Auth redirect allow list
 7. **`FRONTEND_URL`:** Production frontend origin (no trailing slash). Comma-separate extra origins if needed; localhost defaults stay allowed.
+8. **TURN (CCTV):** Cross-network WebRTC needs Cloudflare or Metered env vars — exact names and sign-up: [`docs/turn.md`](docs/turn.md). No client change.
 
 ---
 
@@ -517,7 +521,7 @@ npm run dev
 npm test
 ```
 
-Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, service pricing, conflicts, status transitions, role checks, Stripe webhook signature, GPS walk authz/validation/distance/SSE, CCTV auth matrix/signalling, LISTEN_DATABASE_URL fallback, migration file order).
+Runs unit/integration tests under `utils/`, `services/`, and `db/` (auth, OAuth, payout, bookings, service pricing, conflicts, status transitions, role checks, Stripe webhook signature, GPS walk authz/validation/distance/SSE, CCTV auth matrix/signalling, gated ICE TURN including Cloudflare mint, LISTEN_DATABASE_URL fallback, migration file order).
 
 CI (GitHub Actions) also starts a Postgres 16 service and runs `db:migrate`, `db:seed`, and `db:verify`. That check does not use a live Supabase project.
 

@@ -120,8 +120,9 @@ Wrong party / unknown camera → `404`. Owner without a covering grant or wrong 
 
 Always includes Google STUN (`stun:stun.l.google.com:19302`). Optional TURN from env (placeholders only — never commit real credentials):
 
+- When `TURN_PROVIDER=cloudflare`: mint ~300s ICE via Cloudflare Realtime TURN (`CLOUDFLARE_TURN_KEY_ID` + `CLOUDFLARE_TURN_API_TOKEN`). Mint runs **only after** the grant checks. Fetch timeout; on failure → STUN-only (log, no secrets). Production boot fails if those vars are missing. See `docs/turn.md`.
 - When `TURN_SECRET` is set: coturn REST HMAC, **TTL 300s**. `username = <unixExpiry>:<userId>`, `credential = base64(HMAC-SHA1(secret, username))`.
-- Static `TURN_USERNAME` / `TURN_CREDENTIAL` are a **fallback only** when `TURN_SECRET` is unset, and are still gated (same `cameraId`/`bookingId` check). They are never returned to an arbitrary logged-in user.
+- Static `TURN_USERNAME` / `TURN_CREDENTIAL` are a **fallback only** when `TURN_SECRET` is unset, and are still gated (same `cameraId`/`bookingId` check). They are never returned to an arbitrary logged-in user. Metered free-plan dashboard creds use this path.
 
 ```json
 {
@@ -134,7 +135,7 @@ Always includes Google STUN (`stun:stun.l.google.com:19302`). Optional TURN from
 }
 ```
 
-Free tier: STUN-only is enough on many networks. Set `TURN_URLS` + `TURN_SECRET` (preferred) or static user/pass if you add a TURN server later.
+Free tier: STUN-only is enough on many networks. For cross-NAT viewing set `TURN_PROVIDER=cloudflare` (recommended) or `TURN_URLS` + `TURN_SECRET` / static user/pass. Sign-up and Render vars: `docs/turn.md`.
 
 ---
 
