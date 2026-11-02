@@ -32,6 +32,9 @@ const sitterCamerasRouter = Router();
  *             properties:
  *               name: { type: string }
  *               venueId: { type: string, format: uuid, nullable: true }
+ *               source: { type: string, enum: [webrtc, youtube] }
+ *               youtubeUrl: { type: string, description: "watch / youtu.be / live URL or 11-char id" }
+ *               youtubeVideoId: { type: string, description: "watch / youtu.be / live URL or 11-char id" }
  *     responses:
  *       201:
  *         description: Camera created
@@ -77,7 +80,7 @@ sitterCamerasRouter.get(
  *       404:
  *         description: Camera not found
  *   patch:
- *     summary: Enable or disable a camera (and optionally rename)
+ *     summary: Enable, rename, or set source (webrtc / youtube)
  *     tags: [Cameras]
  *     security:
  *       - bearerAuth: []
@@ -94,6 +97,9 @@ sitterCamerasRouter.get(
  *             properties:
  *               isEnabled: { type: boolean }
  *               name: { type: string }
+ *               source: { type: string, enum: [webrtc, youtube] }
+ *               youtubeUrl: { type: string }
+ *               youtubeVideoId: { type: string }
  *     responses:
  *       200:
  *         description: Camera updated; disabling ends live sessions

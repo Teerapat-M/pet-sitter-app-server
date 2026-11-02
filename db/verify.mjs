@@ -176,6 +176,28 @@ try {
     throw new Error("walks_one_per_booking_idx is missing");
   }
 
+  const { rows: cameraSourceCols } = await client.query(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'cameras'
+           AND column_name = 'source'
+       ) AS has_source,
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'cameras'
+           AND column_name = 'youtube_video_id'
+       ) AS has_youtube_video_id`
+  );
+  if (!cameraSourceCols[0]?.has_source) {
+    throw new Error("cameras.source is missing");
+  }
+  if (!cameraSourceCols[0]?.has_youtube_video_id) {
+    throw new Error("cameras.youtube_video_id is missing");
+  }
+
   await assertCameraGrantsClipAndRevoke(client);
 
   console.log(`ok: ${TABLES.length} tables, ${walkRows[0].n} walk_points`);

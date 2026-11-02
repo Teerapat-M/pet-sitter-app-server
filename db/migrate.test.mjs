@@ -18,7 +18,23 @@ describe("listMigrationFiles", () => {
       "007_walk_tracking.sql",
       "008_cctv_webrtc.sql",
       "009_camera_signals.sql",
+      "010_camera_youtube_source.sql",
     ]);
+  });
+
+  it("010 adds optional youtube source with id format and youtube-requires-id checks", () => {
+    const sql = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations/010_camera_youtube_source.sql"),
+      "utf8"
+    );
+    assert.match(sql, /ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'webrtc'/);
+    assert.match(sql, /ADD COLUMN IF NOT EXISTS youtube_video_id text/);
+    assert.match(sql, /CHECK \(source IN \('webrtc', 'youtube'\)\)/);
+    assert.match(sql, /youtube_video_id IS NULL OR youtube_video_id ~ '\^\[A-Za-z0-9_-\]\{11\}\$'/);
+    assert.match(sql, /source <> 'youtube' OR youtube_video_id IS NOT NULL/);
+    assert.match(sql, /Never a stream key/);
+    assert.match(sql, /do not run against a live database from the app/);
+    assert.doesNotMatch(sql, /stream_key/i);
   });
 
   it("009 stores signalling payloads and indexes created_at", () => {

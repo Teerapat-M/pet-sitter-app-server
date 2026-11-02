@@ -15,6 +15,8 @@ const CAMERA_SELECT = `
   cameras.is_enabled,
   cameras.status,
   cameras.last_seen_at,
+  cameras.source,
+  cameras.youtube_video_id,
   cameras.created_at,
   cameras.updated_at
 `;
@@ -147,17 +149,18 @@ export function createCamerasRepository({
       return rows[0] ?? null;
     },
 
-    async insert({ sitterId, name, venueId }, q = query) {
+    async insert({ sitterId, name, venueId, source, youtubeVideoId }, q = query) {
       const { rows } = await q(
-        `INSERT INTO cameras (sitter_id, name, venue_id, is_enabled, status)
-         VALUES ($1, $2, $3, true, 'offline')
+        `INSERT INTO cameras (sitter_id, name, venue_id, is_enabled, status, source, youtube_video_id)
+         VALUES ($1, $2, $3, true, 'offline', $4, $5)
          RETURNING ${CAMERA_SELECT}`,
-        [sitterId, name, venueId ?? null]
+        [sitterId, name, venueId ?? null, source ?? "webrtc", youtubeVideoId ?? null]
       );
       return rows[0];
     },
 
-    async update(cameraId, { name, isEnabled, status, lastSeenAt }, q = query) {
+    async update(cameraId, patch = {}, q = query) {
+      const setYoutube = Object.hasOwn(patch, "youtubeVideoId");
       const { rows } = await q(
         `UPDATE cameras
          SET
@@ -165,10 +168,21 @@ export function createCamerasRepository({
            is_enabled = COALESCE($3, is_enabled),
            status = COALESCE($4, status),
            last_seen_at = COALESCE($5, last_seen_at),
+           source = COALESCE($6, source),
+           youtube_video_id = CASE WHEN $7 THEN $8 ELSE youtube_video_id END,
            updated_at = now()
          WHERE id = $1
          RETURNING ${CAMERA_SELECT}`,
-        [cameraId, name ?? null, isEnabled, status ?? null, lastSeenAt ?? null]
+        [
+          cameraId,
+          patch.name ?? null,
+          patch.isEnabled,
+          patch.status ?? null,
+          patch.lastSeenAt ?? null,
+          patch.source ?? null,
+          setYoutube,
+          setYoutube ? patch.youtubeVideoId ?? null : null,
+        ]
       );
       return rows[0] ?? null;
     },

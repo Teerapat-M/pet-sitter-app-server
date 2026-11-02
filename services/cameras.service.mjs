@@ -18,6 +18,13 @@ import {
 } from "../utils/cameraSignal.mjs";
 import { iceConfigFromEnv } from "../utils/iceConfig.mjs";
 import {
+  assertWebrtcSignalling,
+  cameraSource,
+  isYoutubeCamera,
+  sourceFieldsFromBody,
+  youtubeVideoIdForClient,
+} from "../utils/youtubeVideoId.mjs";
+import {
   CAMERA_CHANNEL,
   endSessionsForCamera,
   expireCameraSessions,
@@ -33,7 +40,7 @@ function requireName(value) {
   return name;
 }
 
-function mapCamera(row) {
+function mapCamera(row, { revealYoutubeVideoId = false } = {}) {
   if (!row) return null;
   return {
     id: row.id,
@@ -43,7 +50,13 @@ function mapCamera(row) {
     isEnabled: row.is_enabled ?? row.isEnabled,
     status: row.status,
     lastSeenAt: utcIso(row.last_seen_at ?? row.lastSeenAt),
+    source: cameraSource(row),
+    youtubeVideoId: youtubeVideoIdForClient(row, { reveal: revealYoutubeVideoId }),
   };
+}
+
+function isEnabledCamera(row) {
+  return row?.is_enabled !== false && row?.isEnabled !== false;
 }
 
 function mapAccess(grants, now) {
@@ -111,6 +124,7 @@ export function createCamerasService({
         const camera = await camerasRepo.findById(camId);
         if (camera && String(camera.sitter_id) === String(userId)) {
           assertCameraEnabled(camera);
+          assertWebrtcSignalling(camera);
           return await iceConfig(userId, env, { now: now() });
         }
       }
@@ -125,6 +139,7 @@ export function createCamerasService({
           ownerGrantOr403(booking, userId, grant);
           assertCameraMatchesBookingVenue(grant, booking);
           assertCameraEnabled(grant);
+          assertWebrtcSignalling(grant);
         } else {
           const grants = await camerasRepo.listGrantsForBooking(booking.id);
           const covering = grants.filter(
@@ -132,10 +147,12 @@ export function createCamerasService({
               grantCoversAt(grant, now()) && cameraMatchesBookingVenue(grant, booking)
           );
           ownerGrantOr403(booking, userId, covering[0] ?? null);
-          const enabled = covering.find(
-            (grant) => grant.is_enabled !== false && grant.isEnabled !== false
-          );
-          assertCameraEnabled(enabled ?? covering[0]);
+          const enabled = covering.filter(isEnabledCamera);
+          const webrtc = enabled.filter((grant) => !isYoutubeCamera(grant));
+          if (webrtc.length === 0) {
+            assertCameraEnabled(enabled[0] ?? covering[0]);
+            assertWebrtcSignalling(enabled[0] ?? covering[0]);
+          }
         }
         return await iceConfig(userId, env, { now: now() });
       }
@@ -145,12 +162,12 @@ export function createCamerasService({
 
     async listMine(userId) {
       const rows = await camerasRepo.listBySitterId(userId);
-      return rows.map(mapCamera);
+      return rows.map((row) => mapCamera(row, { revealYoutubeVideoId: true }));
     },
 
     async getMine(userId, cameraId) {
       const camera = await loadSitterCamera(userId, requireUuid(cameraId, "cameraId"));
-      return mapCamera(camera);
+      return mapCamera(camera, { revealYoutubeVideoId: true });
     },
 
     async create(userId, body) {
@@ -159,12 +176,18 @@ export function createCamerasService({
       if (venueId != null && venueId !== "") {
         requireUuid(venueId, "venueId");
       }
+      const sourceFields = sourceFieldsFromBody(body) ?? {
+        source: "webrtc",
+        youtubeVideoId: null,
+      };
       const row = await camerasRepo.insert({
         sitterId: userId,
         name,
         venueId: venueId || null,
+        source: sourceFields.source,
+        youtubeVideoId: sourceFields.youtubeVideoId,
       });
-      return mapCamera(row);
+      return mapCamera(row, { revealYoutubeVideoId: true });
     },
 
     async update(userId, cameraId, body) {
@@ -178,14 +201,21 @@ export function createCamerasService({
         }
         patch.isEnabled = enabled;
       }
-      if (patch.name == null && patch.isEnabled == null) {
-        throw httpError(400, "isEnabled or name is required");
+      const sourceFields = sourceFieldsFromBody(body, camera);
+      if (sourceFields) {
+        patch.source = sourceFields.source;
+        patch.youtubeVideoId = sourceFields.youtubeVideoId;
+      }
+      if (patch.name == null && patch.isEnabled == null && !sourceFields) {
+        throw httpError(400, "isEnabled, name, or source is required");
       }
       const updated = await camerasRepo.update(camera.id, patch);
       if (patch.isEnabled === false) {
         endSessionsForCamera(camera.id, "camera_disabled");
+      } else if (sourceFields?.source === "youtube" && !isYoutubeCamera(camera)) {
+        endSessionsForCamera(camera.id, "source_changed");
       }
-      return mapCamera(updated);
+      return mapCamera(updated, { revealYoutubeVideoId: true });
     },
 
     async remove(userId, cameraId) {
@@ -203,7 +233,7 @@ export function createCamerasService({
         lastSeenAt: at,
         status,
       });
-      return mapCamera(updated);
+      return mapCamera(updated, { revealYoutubeVideoId: true });
     },
 
     async listForBooking(userId, bookingId) {
@@ -220,11 +250,16 @@ export function createCamerasService({
         ownerGrantOr403(booking, userId, covering[0] ?? null);
       }
       const access = mapAccess(grants, now());
-      const cameras = grants.map((row) => ({
-        ...mapCamera(row),
-        validFrom: utcIso(row.valid_from),
-        validTo: utcIso(row.valid_to),
-      }));
+      const cameras = grants.map((row) => {
+        const revealYoutubeVideoId =
+          role === "sitter" ||
+          (role === "owner" && grantCoversAt(row, now()) && isEnabledCamera(row));
+        return {
+          ...mapCamera(row, { revealYoutubeVideoId }),
+          validFrom: utcIso(row.valid_from),
+          validTo: utcIso(row.valid_to),
+        };
+      });
       return {
         bookingId: booking.id,
         access,
@@ -253,6 +288,7 @@ export function createCamerasService({
     async postPublisherSignal(userId, cameraId, body) {
       const camera = await loadSitterCamera(userId, requireUuid(cameraId, "cameraId"));
       assertCameraEnabled(camera);
+      assertWebrtcSignalling(camera);
       const signal = parseSignalBody(body);
       const at = now();
       assertCameraSignalRate(
@@ -299,6 +335,7 @@ export function createCamerasService({
       ownerGrantOr403(booking, userId, grant);
       assertCameraMatchesBookingVenue(grant, booking);
       assertCameraEnabled(grant);
+      assertWebrtcSignalling(grant);
       const signal = parseSignalBody(body);
       const at = now();
       assertCameraSignalRate(
