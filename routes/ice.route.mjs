@@ -12,7 +12,8 @@ const iceRouter = Router();
  *     description: |
  *       Requires `cameraId` (sitter of that camera) and/or `bookingId` (owner with
  *       an active grant). Disabled cameras are `403` (no TURN creds). TURN uses
- *       short-lived HMAC creds when `TURN_SECRET` is set.
+ *       Cloudflare mint (`TURN_PROVIDER=cloudflare`) or short-lived HMAC creds
+ *       when `TURN_SECRET` is set.
  *     tags: [Cameras]
  *     security:
  *       - bearerAuth: []

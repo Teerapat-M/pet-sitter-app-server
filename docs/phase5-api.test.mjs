@@ -27,5 +27,7 @@ describe("docs/phase5-api.md ICE contract", () => {
     assert.match(md, /8 total viewers per camera/);
     assert.match(md, /This camera is disabled/);
     assert.match(md, /\*\*403\*\* \(no TURN\)/);
+    assert.match(md, /TURN_PROVIDER=cloudflare/);
+    assert.match(md, /docs\/turn\.md/);
   });
 });

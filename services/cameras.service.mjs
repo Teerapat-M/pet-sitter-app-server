@@ -111,7 +111,7 @@ export function createCamerasService({
         const camera = await camerasRepo.findById(camId);
         if (camera && String(camera.sitter_id) === String(userId)) {
           assertCameraEnabled(camera);
-          return iceConfig(userId, env, { now: now() });
+          return await iceConfig(userId, env, { now: now() });
         }
       }
 
@@ -137,7 +137,7 @@ export function createCamerasService({
           );
           assertCameraEnabled(enabled ?? covering[0]);
         }
-        return iceConfig(userId, env, { now: now() });
+        return await iceConfig(userId, env, { now: now() });
       }
 
       throw httpError(404, "Camera not found");

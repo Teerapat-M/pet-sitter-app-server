@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import { createCamerasService } from "./cameras.service.mjs";
+import { iceConfigFromEnv } from "../utils/iceConfig.mjs";
 import { signalMatchesScope } from "../repositories/cameras.repository.mjs";
 import {
   handleCameraNotification,
@@ -552,5 +553,110 @@ describe("camerasService auth matrix", () => {
       () => service.iceFor(OWNER, { bookingId: BOOKING_ID, cameraId: CAMERA_ID }),
       (err) => err.statusCode === 403 && /venue/.test(err.message)
     );
+  });
+
+  it("gates static TURN creds the same way as HMAC", async () => {
+    const env = {
+      TURN_URLS: "turn:standard.relay.metered.ca:80",
+      TURN_USERNAME: "metered-user",
+      TURN_CREDENTIAL: "metered-pass",
+    };
+    const ice = await service.iceFor(SITTER, { cameraId: CAMERA_ID }, env);
+    assert.equal(ice.iceServers[1].username, "metered-user");
+    await assert.rejects(
+      () => service.iceFor(OTHER, { cameraId: CAMERA_ID }, env),
+      (err) => err.statusCode === 404
+    );
+  });
+
+  it("mints Cloudflare TURN only for authorized ICE callers", async () => {
+    const token = "cf-api-token-secret-do-not-leak";
+    const calls = [];
+    const logs = [];
+    const iceService = createCamerasService({
+      camerasRepo: fakeRepo(state),
+      now: () => NOW,
+      iceConfig: (userId, env, opts) =>
+        iceConfigFromEnv(env, {
+          userId,
+          ...opts,
+          log: (msg) => logs.push(msg),
+          fetchImpl: async (url, init) => {
+            calls.push({ url, init });
+            return {
+              ok: true,
+              status: 201,
+              json: async () => ({
+                iceServers: [
+                  {
+                    urls: ["turn:turn.cloudflare.com:3478?transport=udp"],
+                    username: "cf-user",
+                    credential: "cf-pass",
+                  },
+                ],
+              }),
+            };
+          },
+        }),
+    });
+    const env = {
+      TURN_PROVIDER: "cloudflare",
+      CLOUDFLARE_TURN_KEY_ID: "key-id",
+      CLOUDFLARE_TURN_API_TOKEN: token,
+    };
+
+    await assert.rejects(
+      () => iceService.iceFor(OTHER, { cameraId: CAMERA_ID }, env),
+      (err) => err.statusCode === 404
+    );
+    await assert.rejects(
+      () => iceService.iceFor(OWNER, { bookingId: WALK_BOOKING_ID }, env),
+      (err) => err.statusCode === 403
+    );
+    state.cameras[0].is_enabled = false;
+    await assert.rejects(
+      () => iceService.iceFor(SITTER, { cameraId: CAMERA_ID }, env),
+      (err) => err.statusCode === 403 && /disabled/.test(err.message)
+    );
+    assert.equal(calls.length, 0);
+    state.cameras[0].is_enabled = true;
+
+    const sitterIce = await iceService.iceFor(SITTER, { cameraId: CAMERA_ID }, env);
+    assert.equal(calls.length, 1);
+    assert.equal(sitterIce.iceServers.at(-1).username, "cf-user");
+    const ownerIce = await iceService.iceFor(OWNER, { bookingId: BOOKING_ID }, env);
+    assert.equal(calls.length, 2);
+    assert.equal(ownerIce.iceServers.at(-1).credential, "cf-pass");
+    assert.equal(JSON.stringify({ sitterIce, ownerIce, logs }).includes(token), false);
+  });
+
+  it("falls back to STUN-only when Cloudflare mint fails without leaking secrets", async () => {
+    const token = "cf-api-token-secret-do-not-leak";
+    const logs = [];
+    const iceService = createCamerasService({
+      camerasRepo: fakeRepo(state),
+      now: () => NOW,
+      iceConfig: (userId, env, opts) =>
+        iceConfigFromEnv(env, {
+          userId,
+          ...opts,
+          log: (msg) => logs.push(msg),
+          fetchImpl: async () => {
+            throw new Error(`upstream ${token}`);
+          },
+        }),
+    });
+    const ice = await iceService.iceFor(
+      SITTER,
+      { cameraId: CAMERA_ID },
+      {
+        TURN_PROVIDER: "cloudflare",
+        CLOUDFLARE_TURN_KEY_ID: "key-id",
+        CLOUDFLARE_TURN_API_TOKEN: token,
+      }
+    );
+    assert.deepEqual(ice.iceServers, [{ urls: ["stun:stun.l.google.com:19302"] }]);
+    assert.equal(JSON.stringify({ ice, logs }).includes(token), false);
+    assert.match(logs[0], /\[redacted\]/);
   });
 });
