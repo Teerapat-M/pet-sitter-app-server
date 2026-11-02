@@ -29,5 +29,10 @@ describe("docs/phase5-api.md ICE contract", () => {
     assert.match(md, /\*\*403\*\* \(no TURN\)/);
     assert.match(md, /TURN_PROVIDER=cloudflare/);
     assert.match(md, /docs\/turn\.md/);
+    assert.match(md, /010_camera_youtube_source\.sql/);
+    assert.match(md, /source: "youtube"/);
+    assert.match(md, /anyone who has the link/);
+    assert.match(md, /5–30 seconds/);
+    assert.match(md, /Never a stream key|never stored/);
   });
 });

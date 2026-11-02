@@ -16,7 +16,7 @@ export const swaggerSpec = swaggerJsdoc({
       title: "Pet Sitter API Documentation",
       version: "1.0.0",
       description:
-        "API for pet owner, sitter, booking, and admin. Phase 3: boarding / dog walking / in-home quote, checkout, and status lifecycle (docs/phase3-api.md). Phase 4: GPS walk tracking over SSE (docs/phase4-api.md). Phase 5: CCTV WebRTC signalling over SSE (docs/phase5-api.md).",
+        "API for pet owner, sitter, booking, and admin. Phase 3: boarding / dog walking / in-home quote, checkout, and status lifecycle (docs/phase3-api.md). Phase 4: GPS walk tracking over SSE (docs/phase4-api.md). Phase 5: CCTV WebRTC signalling over SSE, optional YouTube Live per camera (docs/phase5-api.md).",
     },
     servers: [{ url: "http://localhost:4000" }],
     components: {

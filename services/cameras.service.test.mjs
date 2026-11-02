@@ -52,6 +52,8 @@ function cameraRow(overrides = {}) {
     is_enabled: true,
     status: "online",
     last_seen_at: NOW,
+    source: "webrtc",
+    youtube_video_id: null,
     ...overrides,
   };
 }
@@ -79,7 +81,7 @@ function fakeRepo(state) {
     async findById(id) {
       return state.cameras.find((row) => row.id === id) ?? null;
     },
-    async insert({ sitterId, name, venueId }) {
+    async insert({ sitterId, name, venueId, source, youtubeVideoId }) {
       const row = cameraRow({
         id: "ca000001-0001-4001-8001-000000000099",
         sitter_id: sitterId,
@@ -87,6 +89,8 @@ function fakeRepo(state) {
         venue_id: venueId,
         status: "offline",
         last_seen_at: null,
+        source: source ?? "webrtc",
+        youtube_video_id: youtubeVideoId ?? null,
       });
       state.cameras.push(row);
       return row;
@@ -97,6 +101,8 @@ function fakeRepo(state) {
       if (patch.name != null) row.name = patch.name;
       if (patch.isEnabled != null) row.is_enabled = patch.isEnabled;
       if (patch.status != null) row.status = patch.status;
+      if (patch.source != null) row.source = patch.source;
+      if (Object.hasOwn(patch, "youtubeVideoId")) row.youtube_video_id = patch.youtubeVideoId;
       return row;
     },
     async remove(id) {
@@ -223,6 +229,8 @@ describe("camerasService auth matrix", () => {
     const mine = await service.listMine(SITTER);
     assert.equal(mine.length, 1);
     assert.equal(mine[0].isEnabled, true);
+    assert.equal(mine[0].source, "webrtc");
+    assert.equal(mine[0].youtubeVideoId, null);
     await assert.rejects(() => service.getMine(OTHER, CAMERA_ID), (err) => err.statusCode === 404);
   });
 
@@ -628,6 +636,133 @@ describe("camerasService auth matrix", () => {
     assert.equal(calls.length, 2);
     assert.equal(ownerIce.iceServers.at(-1).credential, "cf-pass");
     assert.equal(JSON.stringify({ sitterIce, ownerIce, logs }).includes(token), false);
+  });
+
+  it("stores only the 11-char id from a YouTube URL and never a stream key", async () => {
+    const updated = await service.update(SITTER, CAMERA_ID, {
+      source: "youtube",
+      youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    });
+    assert.equal(updated.source, "youtube");
+    assert.equal(updated.youtubeVideoId, "dQw4w9WgXcQ");
+    assert.equal(state.cameras[0].youtube_video_id, "dQw4w9WgXcQ");
+    await assert.rejects(
+      () =>
+        service.update(SITTER, CAMERA_ID, {
+          source: "youtube",
+          youtubeVideoId: "xxxx-xxxx-xxxx-xxxx",
+        }),
+      (err) => err.statusCode === 400 && /Invalid YouTube/.test(err.message)
+    );
+    assert.equal(state.cameras[0].youtube_video_id, "dQw4w9WgXcQ");
+    const webrtc = await service.update(SITTER, CAMERA_ID, { source: "webrtc" });
+    assert.equal(webrtc.source, "webrtc");
+    assert.equal(webrtc.youtubeVideoId, null);
+    assert.equal(state.cameras[0].youtube_video_id, null);
+  });
+
+  it("returns youtubeVideoId to the sitter and a granted in-window owner only", async () => {
+    state.cameras[0].source = "youtube";
+    state.cameras[0].youtube_video_id = "dQw4w9WgXcQ";
+    state.grants[0].source = "youtube";
+    state.grants[0].youtube_video_id = "dQw4w9WgXcQ";
+
+    const mine = await service.getMine(SITTER, CAMERA_ID);
+    assert.equal(mine.youtubeVideoId, "dQw4w9WgXcQ");
+
+    const owner = await service.listForBooking(OWNER, BOOKING_ID);
+    assert.equal(owner.cameras[0].source, "youtube");
+    assert.equal(owner.cameras[0].youtubeVideoId, "dQw4w9WgXcQ");
+
+    const asSitter = await service.listForBooking(SITTER, BOOKING_ID);
+    assert.equal(asSitter.cameras[0].youtubeVideoId, "dQw4w9WgXcQ");
+
+    state.grants[0].is_enabled = false;
+    const disabled = await service.listForBooking(OWNER, BOOKING_ID);
+    assert.equal(disabled.cameras[0].isEnabled, false);
+    assert.equal(disabled.cameras[0].source, "youtube");
+    assert.equal(disabled.cameras[0].youtubeVideoId, null);
+
+    await assert.rejects(
+      () => service.listForBooking(OTHER, BOOKING_ID),
+      (err) => err.statusCode === 404
+    );
+  });
+
+  it("hides youtubeVideoId from an owner outside the grant window", async () => {
+    state.cameras[0].source = "youtube";
+    state.cameras[0].youtube_video_id = "dQw4w9WgXcQ";
+    state.grants[0].source = "youtube";
+    state.grants[0].youtube_video_id = "dQw4w9WgXcQ";
+    service = createCamerasService({
+      camerasRepo: fakeRepo(state),
+      notify: async (payload) => notified.push(payload),
+      now: () => new Date("2026-11-16T00:00:00.000Z"),
+    });
+    await assert.rejects(
+      () => service.listForBooking(OWNER, BOOKING_ID),
+      (err) => err.statusCode === 403 && /window/.test(err.message)
+    );
+  });
+
+  it("still issues ICE when a booking has an enabled WebRTC camera plus a YouTube one", async () => {
+    state.cameras.push(
+      cameraRow({
+        id: OTHER_CAMERA_ID,
+        name: "Yard live",
+        source: "youtube",
+        youtube_video_id: "dQw4w9WgXcQ",
+      })
+    );
+    state.grants.push(
+      grantRow({
+        id: OTHER_CAMERA_ID,
+        camera_id: OTHER_CAMERA_ID,
+        name: "Yard live",
+        source: "youtube",
+        youtube_video_id: "dQw4w9WgXcQ",
+      })
+    );
+    const ice = await service.iceFor(OWNER, { bookingId: BOOKING_ID });
+    assert.ok(ice.iceServers.length >= 1);
+  });
+
+  it("400s ICE and signalling for youtube cameras after authz", async () => {
+    state.cameras[0].source = "youtube";
+    state.cameras[0].youtube_video_id = "dQw4w9WgXcQ";
+    state.grants[0].source = "youtube";
+    state.grants[0].youtube_video_id = "dQw4w9WgXcQ";
+    const youtubeIce = (err) =>
+      err.statusCode === 400 && /not used for YouTube/.test(err.message);
+
+    await assert.rejects(() => service.iceFor(SITTER, { cameraId: CAMERA_ID }), youtubeIce);
+    await assert.rejects(
+      () => service.iceFor(OWNER, { bookingId: BOOKING_ID, cameraId: CAMERA_ID }),
+      youtubeIce
+    );
+    await assert.rejects(() => service.iceFor(OWNER, { bookingId: BOOKING_ID }), youtubeIce);
+    await assert.rejects(
+      () =>
+        service.postViewerSignal(OWNER, BOOKING_ID, CAMERA_ID, {
+          type: "offer",
+          sessionId: "sess-yt",
+          sdp: "v=0",
+        }),
+      youtubeIce
+    );
+    await assert.rejects(
+      () =>
+        service.postPublisherSignal(SITTER, CAMERA_ID, {
+          type: "answer",
+          sessionId: "sess-yt",
+          sdp: "v=0",
+        }),
+      youtubeIce
+    );
+    await assert.rejects(
+      () => service.iceFor(OTHER, { cameraId: CAMERA_ID }),
+      (err) => err.statusCode === 404
+    );
   });
 
   it("falls back to STUN-only when Cloudflare mint fails without leaking secrets", async () => {
