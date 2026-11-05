@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
-import { createCamerasService } from "./cameras.service.mjs";
+import { createCamerasService, gpsContextFrom } from "./cameras.service.mjs";
 import { iceConfigFromEnv } from "../utils/iceConfig.mjs";
 import { signalMatchesScope } from "../repositories/cameras.repository.mjs";
 import {
@@ -74,6 +74,9 @@ function fakeRepo(state) {
   return {
     async notify() {
       state.notified.push(...arguments);
+    },
+    async sitterGps(sitterId) {
+      return state.sitterGps?.[sitterId] ?? null;
     },
     async listBySitterId(sitterId) {
       return state.cameras.filter((row) => row.sitter_id === sitterId);
@@ -189,6 +192,17 @@ function mockReqRes() {
   return { req, res };
 }
 
+describe("gpsContextFrom", () => {
+  it("returns null without finite coordinates", () => {
+    assert.equal(gpsContextFrom(null), null);
+    assert.equal(gpsContextFrom({}), null);
+    assert.deepEqual(gpsContextFrom({ latitude: 13.7, longitude: 100.5 }), {
+      lat: 13.7,
+      lng: 100.5,
+    });
+  });
+});
+
 describe("camerasService auth matrix", () => {
   let state;
   let service;
@@ -211,6 +225,9 @@ describe("camerasService auth matrix", () => {
         }),
       },
       grants: [grantRow()],
+      sitterGps: {
+        [SITTER]: { latitude: 13.746, longitude: 100.534 },
+      },
     };
     const repo = fakeRepo(state);
     service = createCamerasService({
@@ -230,6 +247,7 @@ describe("camerasService auth matrix", () => {
     assert.equal(mine.length, 1);
     assert.equal(mine[0].isEnabled, true);
     assert.equal(mine[0].source, "webrtc");
+    assert.deepEqual(mine[0].gpsContext, { lat: 13.746, lng: 100.534 });
     assert.equal(mine[0].youtubeVideoId, null);
     await assert.rejects(() => service.getMine(OTHER, CAMERA_ID), (err) => err.statusCode === 404);
   });
@@ -261,6 +279,7 @@ describe("camerasService auth matrix", () => {
     assert.equal(data.access.canView, true);
     assert.equal(data.access.validTo, "2026-11-15T05:00:00.000Z");
     assert.match(data.cameras[0].lastSeenAt, /Z$/);
+    assert.deepEqual(data.cameras[0].gpsContext, { lat: 13.746, lng: 100.534 });
   });
 
   it("400s invalid UUIDs on signalling params without hitting a 500", async () => {

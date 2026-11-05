@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import "dotenv/config";
 import { sslForDatabaseUrl } from "../utils/pgSsl.mjs";
+import { assertNotPlusProductionDatabase } from "./forbidPlusProduction.mjs";
 
 const { Client } = pg;
 
@@ -16,6 +17,7 @@ export function poolConfig(connectionString = process.env.DATABASE_URL) {
   if (!connectionString) {
     throw new Error("DATABASE_URL is required");
   }
+  assertNotPlusProductionDatabase({ databaseUrl: connectionString });
   return {
     connectionString,
     ssl: sslForDatabaseUrl(connectionString),

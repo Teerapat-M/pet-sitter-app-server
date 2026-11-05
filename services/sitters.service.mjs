@@ -2,7 +2,13 @@ import { sitterProfileMeRepository } from "../repositories/sitterProfileMe.repos
 import { sitterProfilesRepository } from "../repositories/sitterProfiles.repository.mjs";
 import { reviewsRepository } from "../repositories/reviews.repository.mjs";
 import { bookingsRepository } from "../repositories/bookings.repository.mjs";
+import { servicesRepository } from "../repositories/services.repository.mjs";
 import { httpError } from "../utils/httpError.mjs";
+import {
+  mapOfferingRow,
+  parseOfferingsBody,
+  planOfferingUpsert,
+} from "../utils/sitterOfferings.mjs";
 import {
   validateSitterBasicBody,
   validateSitterProfileBody,
@@ -31,7 +37,37 @@ export const sittersService = {
       throw httpError(404, "Sitter profile not found");
     }
 
-    return overlayPending(profile);
+    const offerings = await servicesRepository.listBySitterId(userId);
+    return {
+      ...overlayPending(profile),
+      serviceOfferings: offerings.map(mapOfferingRow),
+    };
+  },
+
+  async listMyOfferings(userId) {
+    const profile = await this.getProfileByUserId(userId);
+    return profile.serviceOfferings;
+  },
+
+  async replaceMyOfferings(userId, body) {
+    const incoming = parseOfferingsBody(body);
+    await this.getProfileByUserId(userId);
+    return servicesRepository.withTransaction(async (q) => {
+      const existing = await servicesRepository.listBySitterId(userId, q);
+      const plan = planOfferingUpsert(existing, incoming);
+      const keptIds = [];
+      for (const item of plan.updates) {
+        const row = await servicesRepository.updateOffering(item.id, item, q);
+        keptIds.push(row.id);
+      }
+      for (const item of plan.inserts) {
+        const row = await servicesRepository.insertOffering(userId, item, q);
+        keptIds.push(row.id);
+      }
+      await servicesRepository.deactivateExcept(userId, keptIds, q);
+      const rows = await servicesRepository.listBySitterId(userId, q);
+      return rows.map(mapOfferingRow);
+    });
   },
 
   async getPublicById(id) {

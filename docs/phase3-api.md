@@ -28,13 +28,26 @@ Adds:
 
 `GET /api/sitters/:id/availability` — busy slots `{ startDate, endDate, startTime, endTime }` for active bookings.
 
+### Sitter offerings (classic-ui)
+
+`GET /api/sitters/me` includes `serviceOfferings` (active and inactive).
+
+`GET /api/sitters/me/services` — same list.
+
+`PUT /api/sitters/me/services` `{ offerings: [{ type, mode?, durationMinutes?, priceAmount, currency?, isActive? }] }`
+
+- `type`: `boarding` \| `dog_walking` \| `in_home` \| `stay_with_pet`
+- `stay_with_pet` is stored as `in_home` + `overnight`
+- Rows omitted from the PUT are deactivated, not deleted
+- Public `GET /api/sitters/:id` still returns **active** offerings only
+
 ---
 
 ## Quote
 
 `POST /api/bookings/quote`
 
-Shared fields: `sitterId`, `serviceType` (`boarding` | `dog_walking` | `in_home`), `petIds?`, `totalPrice?` (ignored).
+Shared fields: `sitterId`, `serviceType` (`boarding` | `dog_walking` | `in_home` | `stay_with_pet`), `petIds?`, `totalPrice?` (ignored). `stay_with_pet` is an alias for `in_home` + `overnight` (response `serviceType` remains `in_home`).
 
 ### Boarding
 
@@ -60,10 +73,11 @@ Visit:
 { "sitterId": "uuid", "serviceType": "in_home", "mode": "visit", "date": "2026-11-02", "startTime": "13:00", "visitHours": 2, "petIds": [3] }
 ```
 
-Overnight:
+Overnight / stay-with-pet:
 
 ```json
 { "sitterId": "uuid", "serviceType": "in_home", "mode": "overnight", "checkIn": "2026-11-02", "checkOut": "2026-11-04", "petIds": [3] }
+{ "sitterId": "uuid", "serviceType": "stay_with_pet", "checkIn": "2026-11-02", "checkOut": "2026-11-04", "petIds": [3] }
 ```
 
 Visit price = hours × offering. Overnight = nights × offering.

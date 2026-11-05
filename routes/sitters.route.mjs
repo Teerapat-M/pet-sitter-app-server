@@ -98,6 +98,74 @@ sittersRouter.put(
 
 /**
  * @openapi
+ * /api/sitters/me/services:
+ *   get:
+ *     summary: List my service offerings (boarding, dog walking, in-home / stay-with-pet)
+ *     tags: [Sitters]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Offerings including inactive rows
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Not a sitter
+ *   put:
+ *     summary: Replace my service offerings (omitted rows are deactivated, not deleted)
+ *     tags: [Sitters]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [offerings]
+ *             properties:
+ *               offerings:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [type, priceAmount]
+ *                   properties:
+ *                     type:
+ *                       type: string
+ *                       enum: [boarding, dog_walking, in_home, stay_with_pet]
+ *                     mode:
+ *                       type: string
+ *                       nullable: true
+ *                     durationMinutes:
+ *                       type: integer
+ *                       nullable: true
+ *                     priceAmount:
+ *                       type: number
+ *                     currency:
+ *                       type: string
+ *                     isActive:
+ *                       type: boolean
+ *     responses:
+ *       200:
+ *         description: Saved offerings
+ *       400:
+ *         description: Validation error
+ */
+sittersRouter.get(
+  "/me/services",
+  requireAuth,
+  requireSitter,
+  sittersController.listMyOfferings
+);
+sittersRouter.put(
+  "/me/services",
+  requireAuth,
+  requireSitter,
+  sittersController.replaceMyOfferings
+);
+
+/**
+ * @openapi
  * /api/sitters/me/payout:
  *   get:
  *     summary: Get my payout dashboard

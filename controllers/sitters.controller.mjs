@@ -117,6 +117,24 @@ export const sittersController = {
     }
   },
 
+  async listMyOfferings(req, res, next) {
+    try {
+      const data = await sittersService.listMyOfferings(req.user.id);
+      return res.status(200).json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async replaceMyOfferings(req, res, next) {
+    try {
+      const data = await sittersService.replaceMyOfferings(req.user.id, req.body);
+      return res.status(200).json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async getMyPayout(req, res, next) {
     try {
       const data = await payoutService.getMyPayout(req.user.id, req.query);

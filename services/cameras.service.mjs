@@ -40,7 +40,15 @@ function requireName(value) {
   return name;
 }
 
-function mapCamera(row, { revealYoutubeVideoId = false } = {}) {
+export function gpsContextFrom(row) {
+  if (!row) return null;
+  const lat = Number(row.gps_lat ?? row.latitude ?? row.lat);
+  const lng = Number(row.gps_lng ?? row.longitude ?? row.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function mapCamera(row, { revealYoutubeVideoId = false, gpsContext = undefined } = {}) {
   if (!row) return null;
   return {
     id: row.id,
@@ -52,6 +60,7 @@ function mapCamera(row, { revealYoutubeVideoId = false } = {}) {
     lastSeenAt: utcIso(row.last_seen_at ?? row.lastSeenAt),
     source: cameraSource(row),
     youtubeVideoId: youtubeVideoIdForClient(row, { reveal: revealYoutubeVideoId }),
+    gpsContext: gpsContext === undefined ? gpsContextFrom(row) : gpsContext,
   };
 }
 
@@ -92,6 +101,13 @@ export function createCamerasService({
     const camera = await camerasRepo.findById(cameraId);
     assertSitterCamera(camera, userId);
     return camera;
+  }
+
+  async function gpsForSitter(sitterId, row) {
+    const fromRow = gpsContextFrom(row);
+    if (fromRow) return fromRow;
+    if (typeof camerasRepo.sitterGps !== "function") return null;
+    return gpsContextFrom(await camerasRepo.sitterGps(sitterId));
   }
 
   function ownerGrantOr403(booking, userId, grant) {
@@ -162,12 +178,21 @@ export function createCamerasService({
 
     async listMine(userId) {
       const rows = await camerasRepo.listBySitterId(userId);
-      return rows.map((row) => mapCamera(row, { revealYoutubeVideoId: true }));
+      const gps = await gpsForSitter(userId, null);
+      return rows.map((row) =>
+        mapCamera(row, {
+          revealYoutubeVideoId: true,
+          gpsContext: gpsContextFrom(row) ?? gps,
+        })
+      );
     },
 
     async getMine(userId, cameraId) {
       const camera = await loadSitterCamera(userId, requireUuid(cameraId, "cameraId"));
-      return mapCamera(camera, { revealYoutubeVideoId: true });
+      return mapCamera(camera, {
+        revealYoutubeVideoId: true,
+        gpsContext: await gpsForSitter(userId, camera),
+      });
     },
 
     async create(userId, body) {
@@ -187,7 +212,10 @@ export function createCamerasService({
         source: sourceFields.source,
         youtubeVideoId: sourceFields.youtubeVideoId,
       });
-      return mapCamera(row, { revealYoutubeVideoId: true });
+      return mapCamera(row, {
+        revealYoutubeVideoId: true,
+        gpsContext: await gpsForSitter(userId, row),
+      });
     },
 
     async update(userId, cameraId, body) {
@@ -215,7 +243,10 @@ export function createCamerasService({
       } else if (sourceFields?.source === "youtube" && !isYoutubeCamera(camera)) {
         endSessionsForCamera(camera.id, "source_changed");
       }
-      return mapCamera(updated, { revealYoutubeVideoId: true });
+      return mapCamera(updated, {
+        revealYoutubeVideoId: true,
+        gpsContext: await gpsForSitter(userId, updated),
+      });
     },
 
     async remove(userId, cameraId) {
@@ -233,7 +264,10 @@ export function createCamerasService({
         lastSeenAt: at,
         status,
       });
-      return mapCamera(updated, { revealYoutubeVideoId: true });
+      return mapCamera(updated, {
+        revealYoutubeVideoId: true,
+        gpsContext: await gpsForSitter(userId, updated),
+      });
     },
 
     async listForBooking(userId, bookingId) {
@@ -250,12 +284,16 @@ export function createCamerasService({
         ownerGrantOr403(booking, userId, covering[0] ?? null);
       }
       const access = mapAccess(grants, now());
+      const gps = await gpsForSitter(booking.sitter_id, null);
       const cameras = grants.map((row) => {
         const revealYoutubeVideoId =
           role === "sitter" ||
           (role === "owner" && grantCoversAt(row, now()) && isEnabledCamera(row));
         return {
-          ...mapCamera(row, { revealYoutubeVideoId }),
+          ...mapCamera(row, {
+            revealYoutubeVideoId,
+            gpsContext: gpsContextFrom(row) ?? gps,
+          }),
           validFrom: utcIso(row.valid_from),
           validTo: utcIso(row.valid_to),
         };

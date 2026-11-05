@@ -55,6 +55,29 @@ const offerings = [
 ];
 
 describe("resolveServiceWindow", () => {
+  it("maps stay_with_pet to in-home overnight", () => {
+    assert.deepEqual(
+      resolveServiceWindow({
+        serviceType: "stay_with_pet",
+        checkIn: "2026-11-02",
+        checkOut: "2026-11-04",
+      }),
+      {
+        serviceType: "in_home",
+        mode: "overnight",
+        durationMinutes: null,
+        startDate: "2026-11-02",
+        endDate: "2026-11-04",
+        startTime: "12:00",
+        endTime: "12:00",
+        duration: 2,
+        durationUnit: "nights",
+        nights: 2,
+        hours: null,
+      }
+    );
+  });
+
   it("boards from check-in to check-out at 12:00", () => {
     assert.deepEqual(
       resolveServiceWindow({
@@ -200,6 +223,20 @@ describe("buildServiceQuote", () => {
       offerings
     );
     assert.equal(quote.totalPrice, 1400);
+  });
+
+  it("prices stay_with_pet as in-home overnight", () => {
+    const quote = buildServiceQuote(
+      {
+        serviceType: "stay_with_pet",
+        checkIn: "2026-11-02",
+        checkOut: "2026-11-04",
+      },
+      offerings
+    );
+    assert.equal(quote.serviceType, "in_home");
+    assert.equal(quote.mode, "overnight");
+    assert.equal(quote.totalPrice, 2800);
   });
 
   it("404s when the sitter has no matching offering", () => {

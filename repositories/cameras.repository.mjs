@@ -126,6 +126,17 @@ export function createCamerasRepository({
       await q("SELECT pg_notify($1, $2)", [channel, payload]);
     },
 
+    async sitterGps(sitterId, q = query) {
+      const { rows } = await q(
+        `SELECT latitude, longitude
+         FROM sitter_profiles
+         WHERE user_id = $1
+         LIMIT 1`,
+        [sitterId]
+      );
+      return rows[0] ?? null;
+    },
+
     async listBySitterId(sitterId, q = query) {
       const { rows } = await q(
         `SELECT ${CAMERA_SELECT}

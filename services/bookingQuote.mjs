@@ -76,8 +76,12 @@ function optionalTime(value, fallback) {
 
 export function normalizeServiceType(value) {
   const type = trimString(value);
+  if (type === "stay_with_pet") return "in_home";
   if (!SERVICE_TYPES.has(type)) {
-    throw httpError(400, "serviceType must be boarding, dog_walking, or in_home");
+    throw httpError(
+      400,
+      "serviceType must be boarding, dog_walking, in_home, or stay_with_pet"
+    );
   }
   return type;
 }
@@ -132,8 +136,15 @@ function nightRange(body) {
 }
 
 export function resolveServiceWindow(body) {
+  const rawType = trimString(body?.serviceType);
   const serviceType = normalizeServiceType(body?.serviceType);
-  const modeRaw = trimString(body?.mode) || null;
+  let modeRaw = trimString(body?.mode) || null;
+  if (rawType === "stay_with_pet") {
+    if (modeRaw && modeRaw !== "overnight") {
+      throw httpError(400, "stay_with_pet is overnight only");
+    }
+    modeRaw = "overnight";
+  }
 
   if (serviceType === "boarding") {
     if (modeRaw) {

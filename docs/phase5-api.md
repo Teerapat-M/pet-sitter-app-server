@@ -36,7 +36,9 @@ Disabling a camera, leaving `in_service`, or the grant window ending sends `sess
 
 ## Sitter cameras
 
-`GET /api/sitters/cameras` — list `{ id, sitterId, venueId, name, isEnabled, status, lastSeenAt, source, youtubeVideoId }`
+`GET /api/sitters/cameras` — list `{ id, sitterId, venueId, name, isEnabled, status, lastSeenAt, source, youtubeVideoId, gpsContext }`
+
+`gpsContext` is `{ lat, lng }` from the sitter profile when both coordinates are set, otherwise `null`. Same field on owner `GET /api/bookings/:id/cameras`. No extra camera columns.
 
 `POST /api/sitters/cameras` `{ name, venueId?, source?, youtubeUrl? | youtubeVideoId? }` → `201`. Default `source` is `webrtc`.
 
@@ -86,6 +88,7 @@ Allowed only when the caller is the booking **owner** (or the booking sitter) **
         "lastSeenAt": "2026-10-30T05:00:00.000Z",
         "source": "webrtc",
         "youtubeVideoId": null,
+        "gpsContext": { "lat": 13.746, "lng": 100.534 },
         "validFrom": "2026-10-28T05:00:00.000Z",
         "validTo": "2026-11-15T05:00:00.000Z"
       }

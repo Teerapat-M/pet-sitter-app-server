@@ -14,7 +14,7 @@ const sitterCamerasRouter = Router();
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Camera list with status
+ *         description: Camera list with status, source, and optional gpsContext from the sitter profile
  *       403:
  *         description: Not a sitter
  *   post:

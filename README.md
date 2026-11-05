@@ -12,6 +12,8 @@
 **Client (this upgrade):** https://github.com/Teerapat-M/pet-sitter-app-client  
 **Health check:** `GET /health`
 
+`main` is Pet Sitter Plus production. Classic-client API work lives on **`classic-ui`** (draft PR only — do not merge). Do not run migrations or seeds against the live Plus Supabase project `dvdzzrcdhafhlvjxrabe`. See [`docs/classic-ui-api.md`](docs/classic-ui-api.md).
+
 ---
 
 ## Pet Sitter Plus roadmap
@@ -124,6 +126,7 @@ pet-sitter-app-server/
 │       ├── 009_camera_signals.sql
 │       └── 010_camera_youtube_source.sql
 ├── docs/
+│   ├── classic-ui-api.md       # Classic-ui branch: four features + Plus-DB guard
 │   ├── phase3-api.md           # Phase 3 request/response contract
 │   ├── phase4-api.md           # Phase 4 GPS walk contract (SSE + Leaflet)
 │   └── phase5-api.md           # Phase 5 CCTV WebRTC signalling (SSE)
@@ -184,7 +187,7 @@ npm run db:migrate   # apply db/migrations/*.sql, tracked in schema_migrations
 npm run db:seed      # demo owners, sitters, pets, bookings, cameras, walks
 ```
 
-Both commands read `DATABASE_URL`. Use the **direct** Postgres URI (port 5432), not the pooler, for DDL. Do not point these scripts at production unless you intend to.
+Both commands read `DATABASE_URL`. Use the **direct** Postgres URI (port 5432), not the pooler, for DDL. Do not point these scripts at production unless you intend to. They **refuse** the live Plus project `dvdzzrcdhafhlvjxrabe`.
 
 Chat and GPS SSE use PostgreSQL `LISTEN/NOTIFY` on a **dedicated session connection**. If `DATABASE_URL` is the transaction pooler (`:6543`), set `LISTEN_DATABASE_URL` to the session pooler (`:5432`) or the direct URI. The query pool is unchanged. Listeners reconnect on connection error. In production, boot fails if `LISTEN_DATABASE_URL` is missing when `DATABASE_URL` is a transaction pooler, or if `LISTEN_DATABASE_URL` itself is a transaction pooler.
 
@@ -345,8 +348,10 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/` | — | Search/list sitters |
-| GET | `/me` | Sitter | My sitter profile |
+| GET | `/me` | Sitter | My sitter profile (`serviceOfferings`) |
 | PUT | `/me` | Sitter | Update profile + images |
+| GET | `/me/services` | Sitter | List my offerings (boarding / walk / in-home / stay-with-pet) |
+| PUT | `/me/services` | Sitter | Replace offerings (omitted rows deactivated) |
 | GET | `/me/payout` | Sitter | Payout transactions & earnings |
 | GET | `/me/payout/bank-account` | Sitter | Get bank account |
 | PUT | `/me/payout/bank-account` | Sitter | Update bank account |
@@ -372,7 +377,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/` | Sitter | List my cameras (`status`, `isEnabled`, `lastSeenAt`, `source`, `youtubeVideoId`) |
+| GET | `/` | Sitter | List my cameras (`status`, `isEnabled`, `lastSeenAt`, `source`, `youtubeVideoId`, `gpsContext`) |
 | POST | `/` | Sitter | Register a camera (`name`, optional `venueId`, optional `source` / YouTube URL or id) |
 | GET | `/events` | Sitter | SSE `camera:status` + WebRTC signalling |
 | GET | `/:id` | Sitter | One camera |
@@ -397,7 +402,7 @@ Interactive docs: [http://localhost:4000/api-docs](http://localhost:4000/api-doc
 | GET | `/:id/walk` | Bearer | Current walk + summary (owner or sitter; others 404) |
 | GET | `/:id/walk/points` | Bearer | Route history + summary |
 | GET | `/:id/walk/events` | Bearer | SSE live trail (same auth as chat SSE) |
-| GET | `/:id/cameras` | Bearer | Cameras + status + access window + `source` / `youtubeVideoId` (in-service boarding; owner 403 outside window / non-boarding; others 404; video id only if granted + enabled) |
+| GET | `/:id/cameras` | Bearer | Cameras + status + access window + `source` / `youtubeVideoId` / `gpsContext` (in-service boarding; owner 403 outside window / non-boarding; others 404; video id only if granted + enabled) |
 | GET | `/:id/cameras/events` | Bearer | SSE `camera:status` + WebRTC signalling |
 | POST | `/:id/cameras/:cameraId/signal` | Bearer | Relay offer / ICE (viewer) |
 
